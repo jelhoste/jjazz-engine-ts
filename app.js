@@ -671,6 +671,7 @@ let store;
 let styles;
 let styleUi;
 let activeTab = 'song';
+let stylesDirty = false;
 let editor;
 let library;
 /** Morceau ouvert dans l'éditeur (null = pas encore enregistré) */
@@ -924,11 +925,17 @@ function applyStyleUi() {
 function showTab(tab) {
     if (tab === activeTab)
         return;
+    const prev = activeTab;
     activeTab = tab;
-    for (const [id, t] of [['tabSong', 'song'], ['tabStyles', 'styles']])
+    for (const [id, t] of [['tabSong', 'song'], ['tabStyles', 'styles'], ['tabSettings', 'settings']])
         $(id).setAttribute('aria-selected', String(t === tab));
     $('songTab').hidden = tab !== 'song';
     $('stylesTab').hidden = tab !== 'styles';
+    $('settingsTab').hidden = tab !== 'settings';
+    if (prev === 'styles') {
+        styleUi.hide();
+        stylesDirty = true;
+    }
     if (tab === 'styles') {
         playlist = null;
         updatePlaylistInfo();
@@ -936,8 +943,8 @@ function showTab(tab) {
         closeStage();
         styleUi.show();
     }
-    else {
-        styleUi.hide();
+    else if (tab === 'song' && stylesDirty) {
+        stylesDirty = false;
         // les styles ont pu être modifiés, supprimés ou renommés : on remet la liste à jour et on adapte la métrique
         const before = val('style'), wasMeter = meterBeats();
         refreshStyleSelect();
@@ -1413,8 +1420,36 @@ function initAudio() {
     // Diagnostic (tests d'interface) : niveau de sortie et nombre de notes envoyées à la SoundFont
     window.jjDebug = { level: () => player.level(), sent: () => player.sf?.sent ?? 0 };
 }
+const UI_KEY = 'jjswing.ui.v1';
+/** Taille de l'interface : l (origine), m (boutons compacts), s (boutons et texte compacts) ; mémorisée sur l'appareil */
+function initUiSize() {
+    const sel = $('uiSize');
+    let size = 'l';
+    try {
+        const v = JSON.parse(localStorage.getItem(UI_KEY) ?? '{}').size;
+        if (v === 'm' || v === 's')
+            size = v;
+    }
+    catch { /* taille par défaut */ }
+    const apply = (v) => {
+        if (v === 'l')
+            document.documentElement.removeAttribute('data-size');
+        else
+            document.documentElement.setAttribute('data-size', v);
+        sel.value = v;
+    };
+    apply(size);
+    sel.addEventListener('change', () => {
+        apply(sel.value);
+        try {
+            localStorage.setItem(UI_KEY, JSON.stringify({ size: sel.value }));
+        }
+        catch { /* ignoré */ }
+    });
+}
 function init() {
     initTheme();
+    initUiSize();
     store = new songModel_1.LibraryStore(safeStorage());
     const presets = $('preset');
     presets.add(new Option('Grilles d\'exemple…', ''));
@@ -1471,6 +1506,7 @@ function init() {
     initAudio();
     $('tabSong').addEventListener('click', () => showTab('song'));
     $('tabStyles').addEventListener('click', () => showTab('styles'));
+    $('tabSettings').addEventListener('click', () => showTab('settings'));
     const styleSel = $('style');
     styleSel.addEventListener('change', () => {
         const wasMeter = meterBeats();
@@ -11233,6 +11269,8 @@ function bucket(hits, bars, spb) {
     }
     return res;
 }
+/** Durée d'une note de basse ou de claviers (n pas), coupée à la fin de l'accord pour ne pas déborder sur le suivant */
+const noteDur = (n, sub, sp, t) => Math.max(0.1, Math.min((n / sub) * 0.92, sp.to - t - 0.02));
 const keep = (h) => h.pr === undefined || h.pr >= 1 || (0, random_1.random)() < h.pr;
 /** Variante et phase (numéro de mesure dans le motif) de chaque mesure pour une piste */
 function planLane(nbBars, main, setting, perBar, total) {
@@ -11335,7 +11373,7 @@ function generateStyle(def, chords, o = {}) {
                 const t = t0 + (h.s - base) / sub;
                 const si = spanAt(spans, t);
                 const acc = (h.s - base) % sub === 0;
-                bass.add({ pitch: bassPitch(spans[si], h, spans[si + 1], t), positionInBeats: t, durationInBeats: Math.max(0.1, (h.n / sub) * 0.92), velocity: clampVel(h.v + (acc ? 4 : 0) + bShift + ((0, random_1.random)() - 0.5) * 8) });
+                bass.add({ pitch: bassPitch(spans[si], h, spans[si + 1], t), positionInBeats: t, durationInBeats: noteDur(h.n, sub, spans[si], t), velocity: clampVel(h.v + (acc ? 4 : 0) + bShift + ((0, random_1.random)() - 0.5) * 8) });
             }
         }
         if (o.keys !== false) {
@@ -11349,7 +11387,7 @@ function generateStyle(def, chords, o = {}) {
                 const notes = h.t ? writtenPitches(spans[si], h.t) : voicingsFor(v.voicing === 'seventh')[si];
                 const vel = clampVel(h.v + kShift + ((0, random_1.random)() - 0.5) * 8);
                 for (const p of notes)
-                    piano.add({ pitch: p, positionInBeats: t, durationInBeats: Math.max(0.1, (h.n / sub) * 0.92), velocity: vel });
+                    piano.add({ pitch: p, positionInBeats: t, durationInBeats: noteDur(h.n, sub, spans[si], t), velocity: vel });
             }
         }
     }
@@ -13524,6 +13562,8 @@ class StyleUi {
         /** Octave de départ de la fenêtre de 2 octaves (basse, claviers) */
         this.oct = { bass: 0, keys: 0 };
         this.full = null;
+        /** Longueur des notes posées (en pas) pour la basse et les claviers ; 0 = valeur par défaut */
+        this.entry = { bass: 0, keys: 0 };
         this.sel = null;
         this.previewing = false;
         this.raf = 0;
@@ -13724,6 +13764,11 @@ class StyleUi {
             });
             head.append((0, dom_1.h)('span', { class: 'meta' }, 'Motif de'), bars);
         }
+        if (lane !== 'drums') {
+            const ent = (0, dom_1.h)('select', { id: 'entry_' + lane, 'aria-label': `Longueur des notes posées : ${title}`, title: 'Longueur des nouvelles notes (on peut aussi tenir le doigt sur une note et glisser pour l\'allonger)' }, ...this.noteValues(v.bars).map((x) => { const o = new Option(x.label, String(x.steps)); o.selected = x.steps === this.entryLen(lane); return o; }));
+            ent.addEventListener('change', () => { this.entry[lane] = Number(ent.value); });
+            head.append((0, dom_1.h)('span', { class: 'meta' }, 'Nouvelle note :'), ent);
+        }
         if (lane === 'keys') {
             const voicing = (0, dom_1.h)('select', { id: 'voicingSel', 'aria-label': 'Voicing des accords automatiques', disabled: this.readOnly }, new Option('Accords : triade', 'triad'), new Option('Accords : avec septième', 'seventh'));
             voicing.value = v.voicing ?? 'triad';
@@ -13815,25 +13860,109 @@ class StyleUi {
         bar.append(del);
         return bar;
     }
-    /** Grille d'une piste : lignes × pas ; `state` donne la classe de chaque cellule */
-    grid(lane, rows, bars, state, tap, firstFill = -1) {
+    /**
+     * Grille d'une piste : lignes × pas ; `state` donne la classe de chaque cellule. Avec `resize` (basse, claviers), on allonge une note en
+     * glissant le long de la ligne : souris = bouton enfoncé ; doigt = tenir un instant puis glisser (un balayage rapide fait défiler la grille).
+     */
+    grid(lane, rows, bars, state, tap, firstFill = -1, resize) {
         const spb = this.spb, steps = bars * spb, sub = this.def.sub;
         const wrap = (0, dom_1.h)('div', { class: 'gridwrap' });
         const g = (0, dom_1.h)('div', { class: 'stepgrid', style: `grid-template-columns: var(--lw) repeat(${steps}, var(--cw));` });
+        const cells = [];
         rows.forEach((r, ri) => {
             g.append((0, dom_1.h)('div', { class: 'rl' + (r.cls ? ' ' + r.cls : ''), title: r.title ?? r.label }, r.label));
             for (let s = 0; s < steps; s++) {
                 const cls = state(ri, s);
-                const c = (0, dom_1.h)('button', { type: 'button', class: `cell${cls ? ' ' + cls : ''}${r.cls ? ' ' + r.cls : ''}${s % spb === 0 ? ' barline' : s % sub === 0 ? ' beatline' : ''}${firstFill >= 0 && s >= firstFill ? ' infill' : ''}`, 'data-r': ri, 'data-s': s, 'aria-label': `${r.label}, pas ${s + 1}`, 'aria-pressed': cls.includes('on') });
+                const base = `cell${r.cls ? ' ' + r.cls : ''}${s % spb === 0 ? ' barline' : s % sub === 0 ? ' beatline' : ''}${firstFill >= 0 && s >= firstFill ? ' infill' : ''}`;
+                const c = (0, dom_1.h)('button', { type: 'button', class: base + (cls ? ' ' + cls : ''), 'data-r': ri, 'data-s': s, 'aria-label': `${r.label}, pas ${s + 1}`, 'aria-pressed': cls.includes('on') });
+                cells.push({ el: c, base, r: ri, s });
                 g.append(c);
             }
         });
+        /** Remet à jour les classes de toutes les cellules sans reconstruire la grille (pendant un glissement) */
+        const paint = () => { for (const c of cells) {
+            const cls = state(c.r, c.s);
+            c.el.className = c.base + (cls ? ' ' + cls : '');
+            c.el.setAttribute('aria-pressed', String(cls.includes('on')));
+        } };
+        const cellOf = (t) => (t instanceof Element ? t.closest('.cell') : null);
+        let suppress = false;
         g.addEventListener('click', (e) => {
-            const t = e.target.closest('.cell');
+            if (suppress)
+                return;
+            const t = cellOf(e.target);
             if (!t)
                 return;
             tap(Number(t.dataset.r), Number(t.dataset.s));
         });
+        if (resize) {
+            let drag = null;
+            const end = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+                window.removeEventListener('pointercancel', cancel);
+                if (drag)
+                    window.clearTimeout(drag.timer);
+            };
+            const cancel = () => { end(); drag = null; };
+            const move = (e) => {
+                const d = drag;
+                if (!d)
+                    return;
+                if (!d.armed) {
+                    if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 8)
+                        cancel();
+                    return;
+                }
+                const el = cellOf(document.elementFromPoint(e.clientX, e.clientY));
+                if (!el)
+                    return;
+                const col = Number(el.dataset.s);
+                if (!d.active) {
+                    if (col <= d.s0)
+                        return;
+                    const got = resize.grab(d.row, d.s0);
+                    if (!got) {
+                        cancel();
+                        return;
+                    }
+                    d.hit = got;
+                    d.active = true;
+                }
+                const n = Math.max(1, Math.min(steps - d.s0, col - d.s0 + 1));
+                if (d.hit && d.hit.n !== n) {
+                    d.hit.n = n;
+                    paint();
+                }
+            };
+            const up = () => {
+                const d = drag;
+                end();
+                drag = null;
+                if (d?.active) {
+                    suppress = true;
+                    window.setTimeout(() => { suppress = false; }, 0);
+                    this.edit(() => undefined);
+                }
+            };
+            g.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0 || this.readOnly)
+                    return;
+                const t = cellOf(e.target);
+                if (!t)
+                    return;
+                const d = { row: Number(t.dataset.r), s0: Number(t.dataset.s), x0: e.clientX, y0: e.clientY, armed: e.pointerType === 'mouse', active: false, hit: null, timer: 0 };
+                if (!d.armed)
+                    d.timer = window.setTimeout(() => { d.armed = true; }, 280);
+                drag = d;
+                window.addEventListener('pointermove', move);
+                window.addEventListener('pointerup', up);
+                window.addEventListener('pointercancel', cancel);
+            });
+            // Doigt : une fois « armé » (appui maintenu), le glissement ne fait plus défiler la grille
+            wrap.addEventListener('touchmove', (e) => { if (drag?.armed && e.cancelable)
+                e.preventDefault(); }, { passive: false });
+        }
         const ph = (0, dom_1.h)('div', { class: 'playhead', hidden: true });
         g.append(ph);
         this.playheads.push({ el: ph, lane, bars, fill: firstFill >= 0 });
@@ -13844,6 +13973,33 @@ class StyleUi {
         return !!this.sel && this.sel.lane === lane && this.sel.i === i && (tone === undefined || this.sel.tone === tone);
     }
     defaultLen() { return Math.max(1, Math.round(this.def.sub / 2)); }
+    /** Valeurs de notes proposables avec la grille du style : (nombre de pas, nom) */
+    noteValues(bars = 8) {
+        const d = this.def, stepQ = (d.meter === 6 ? 1.5 : 1) / d.sub, max = bars * this.spb;
+        const table = [[4, 'ronde'], [3, 'blanche pointée'], [2, 'blanche'], [1.5, 'noire pointée'], [1, 'noire'], [0.75, 'croche pointée'], [0.5, 'croche'], [0.25, 'double croche'], [2 / 3, 'noire de triolet'], [1 / 3, 'croche de triolet'], [1 / 6, 'double croche de triolet']];
+        const out = [];
+        for (const [q, label] of table) {
+            const st = q / stepQ;
+            if (st >= 1 - 1e-6 && Math.abs(st - Math.round(st)) < 1e-6 && Math.round(st) <= max && !out.some((x) => x.steps === Math.round(st)))
+                out.push({ steps: Math.round(st), label });
+        }
+        const bar = this.spb;
+        if (!out.some((x) => x.steps === bar))
+            out.push({ steps: bar, label: 'mesure' });
+        return out.sort((a, b) => b.steps - a.steps);
+    }
+    /** Longueur d'entrée de la piste : le choix de l'utilisateur s'il existe avec cette grille, sinon croche (basse) ou noire (claviers) */
+    entryLen(lane) {
+        const vals = this.noteValues();
+        if (this.entry[lane] && vals.some((v) => v.steps === this.entry[lane]))
+            return this.entry[lane];
+        const want = (lane === 'bass' ? 0.5 : 1) / ((this.def.meter === 6 ? 1.5 : 1) / this.def.sub);
+        return vals.reduce((b, v) => (Math.abs(v.steps - want) < Math.abs(b.steps - want) ? v : b)).steps;
+    }
+    lenLabel(n) {
+        const v = this.noteValues().find((x) => x.steps === n);
+        return v ? `${n} · ${v.label}` : String(n);
+    }
     // --- Batterie (et fill)
     drumsGrid(v) {
         const hits = v.hits;
@@ -13921,7 +14077,20 @@ class StyleUi {
                     hits[i].i = r.t;
                 } this.sel = { lane: 'bass', i }; });
             else
-                this.edit(() => { hits.push({ s, n: this.defaultLen(), v: 90, i: r.ap ? 0 : r.t, ...(r.ap ? { ap: true } : {}) }); this.sel = { lane: 'bass', i: hits.length - 1 }; });
+                this.edit(() => { hits.push({ s, n: this.entryLen('bass'), v: 90, i: r.ap ? 0 : r.t, ...(r.ap ? { ap: true } : {}) }); this.sel = { lane: 'bass', i: hits.length - 1 }; });
+        }, -1, {
+            grab: (ri, s) => {
+                const r = rowsDef[ri], i = hits.findIndex((x) => x.s === s);
+                if (i >= 0) {
+                    if (!(r.ap ? !!hits[i].ap : !hits[i].ap && hits[i].i === r.t))
+                        return null;
+                    this.sel = { lane: 'bass', i };
+                    return hits[i];
+                }
+                hits.push({ s, n: 1, v: 90, i: r.ap ? 0 : r.t, ...(r.ap ? { ap: true } : {}) });
+                this.sel = { lane: 'bass', i: hits.length - 1 };
+                return hits[hits.length - 1];
+            },
         });
         return [this.octaveBar('bass', outside), grid, this.legend()];
     }
@@ -13962,7 +14131,7 @@ class StyleUi {
                 else if (i >= 0)
                     this.edit(() => { delete hits[i].t; this.sel = { lane: 'keys', i }; });
                 else
-                    this.edit(() => { hits.push({ s, n: this.defaultLen() * 2, v: 80 }); this.sel = { lane: 'keys', i: hits.length - 1 }; });
+                    this.edit(() => { hits.push({ s, n: this.entryLen('keys'), v: 80 }); this.sel = { lane: 'keys', i: hits.length - 1 }; });
                 return;
             }
             const t = r.t;
@@ -13986,8 +14155,38 @@ class StyleUi {
                 this.edit(() => { hits[i].t = [{ i: t }]; this.sel = { lane: 'keys', i, tone: 0 }; });
             }
             else {
-                this.edit(() => { hits.push({ s, n: this.defaultLen() * 2, v: 80, t: [{ i: t }] }); this.sel = { lane: 'keys', i: hits.length - 1, tone: 0 }; });
+                this.edit(() => { hits.push({ s, n: this.entryLen('keys'), v: 80, t: [{ i: t }] }); this.sel = { lane: 'keys', i: hits.length - 1, tone: 0 }; });
             }
+        }, -1, {
+            grab: (ri, s) => {
+                const r = rowsDef[ri], i = hits.findIndex((x) => x.s === s);
+                if (r.auto) {
+                    if (i >= 0) {
+                        if (hits[i].t)
+                            return null;
+                        this.sel = { lane: 'keys', i };
+                        return hits[i];
+                    }
+                    hits.push({ s, n: 1, v: 80 });
+                    this.sel = { lane: 'keys', i: hits.length - 1 };
+                    return hits[hits.length - 1];
+                }
+                const t = r.t;
+                if (i >= 0) {
+                    if (!hits[i].t)
+                        return null;
+                    let ti = toneIdx(hits[i], t);
+                    if (ti < 0) {
+                        hits[i].t.push({ i: t });
+                        ti = hits[i].t.length - 1;
+                    }
+                    this.sel = { lane: 'keys', i, tone: ti };
+                    return hits[i];
+                }
+                hits.push({ s, n: 1, v: 80, t: [{ i: t }] });
+                this.sel = { lane: 'keys', i: hits.length - 1, tone: 0 };
+                return hits[hits.length - 1];
+            },
         });
         return [this.octaveBar('keys', outside), grid,
             (0, dom_1.h)('p', { class: 'note' }, 'Ligne « Accord auto » : rythme seul, les notes sont choisies pour l\'accord. Autres lignes : notes écrites (une note de la gamme absente de l\'accord n\'est pas jouée).'), this.legend()];
@@ -14012,8 +14211,18 @@ class StyleUi {
         box.append((0, dom_1.h)('div', { class: 'meta', id: 'inspInfo' }, `Frappe sélectionnée : ${pos}${what}`));
         const row = (0, dom_1.h)('div', { class: 'insprow' });
         row.append(this.stepper('Force', () => hit.v, (n) => this.edit(() => { hit.v = n; }), 1, 127, 5, String, 'inspVel'));
-        if (lane !== 'drums')
-            row.append(this.stepper('Durée (pas)', () => hit.n ?? 1, (n) => this.edit(() => { hit.n = n; }), 1, Math.max(1, max - hit.s), 1, (n) => `${n}` + (n % sub === 0 ? ` (${n / sub} t)` : ''), 'inspLen'));
+        if (lane !== 'drums') {
+            row.append(this.stepper('Durée (pas)', () => hit.n ?? 1, (n) => this.edit(() => { hit.n = n; }), 1, Math.max(1, max - hit.s), 1, (n) => this.lenLabel(n), 'inspLen'));
+            const vals = this.noteValues(v.bars).filter((x) => x.steps <= max - hit.s);
+            const valSel = (0, dom_1.h)('select', { id: 'inspValue', 'aria-label': 'Valeur de la note' }, ...vals.map((x) => { const o = new Option(x.label, String(x.steps)); o.selected = x.steps === hit.n; return o; }));
+            if (!vals.some((x) => x.steps === hit.n)) {
+                const o = new Option(`autre (${hit.n} pas)`, String(hit.n));
+                o.selected = true;
+                valSel.insertBefore(o, valSel.firstChild);
+            }
+            valSel.addEventListener('change', () => this.edit(() => { hit.n = Number(valSel.value); }));
+            row.append((0, dom_1.h)('div', { class: 'field' }, (0, dom_1.h)('label', { for: 'inspValue' }, 'Valeur de la note'), valSel));
+        }
         if (!v.fill)
             row.append(this.stepper('Probabilité', () => Math.round((hit.pr ?? 1) * 100), (n) => this.edit(() => { if (n >= 100)
                 delete hit.pr;
