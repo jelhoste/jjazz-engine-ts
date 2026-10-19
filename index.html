@@ -3,91 +3,272 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){var t=null;try{t=localStorage.getItem("jjswing.theme")}catch(e){}if(t!=="light"&&t!=="dark"&&t!=="contrast"){t=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)})()</script>
 <title>Accompagnement jazz (moteur JJSwing en TypeScript)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
 <meta name="theme-color" content="#1d2733">
 <style>
-  :root { color-scheme: light dark; --bg:#f4f1ea; --fg:#1d2733; --card:#fff; --line:#d8d2c4; --accent:#b4531c; --now:#ffe2b8; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#161c24; --fg:#e8e4da; --card:#1f2833; --line:#34404f; --accent:#e08a4a; --now:#5a3a1c; } }
+  :root { color-scheme: light dark; --bg:#f4f1ea; --fg:#1d2733; --card:#fff; --line:#d8d2c4; --accent:#b4531c; --now:#ffe2b8; --on-accent:#fff; --error:#c0392b; --focus:#b4531c; --bw:1px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme]) { --bg:#161c24; --fg:#e8e4da; --card:#1f2833; --line:#34404f; --accent:#e08a4a; --now:#5a3a1c; --on-accent:#1b130c; --error:#ff8a7a; --focus:#e08a4a; } }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; --bg:#161c24; --fg:#e8e4da; --card:#1f2833; --line:#34404f; --accent:#e08a4a; --now:#5a3a1c; --on-accent:#1b130c; --error:#ff8a7a; --focus:#e08a4a; }
+  /* Haut contraste (malvoyants) : noir, blanc et jaune seulement ; rapports de contraste >= 15:1 (WCAG AAA : 7:1) ; bordures épaisses, focus bien visible */
+  :root[data-theme="contrast"] { color-scheme: dark; --bg:#000; --fg:#fff; --card:#000; --line:#fff; --accent:#ffff00; --now:#ffff00; --on-accent:#000; --error:#ffff00; --focus:#fff; --bw:2px; }
+  :root[data-theme="contrast"] button.secondary, :root[data-theme="contrast"] button.chip, :root[data-theme="contrast"] .bar, :root[data-theme="contrast"] .addbar, :root[data-theme="contrast"] .dial,
+  :root[data-theme="contrast"] textarea, :root[data-theme="contrast"] select, :root[data-theme="contrast"] input[type=number], :root[data-theme="contrast"] .titlebar input[type=text] { border-width:2px; }
+  :root[data-theme="contrast"] button.secondary { color:#ffff00; border-color:#ffff00; background:#000; }
+  :root[data-theme="contrast"] button.chip { color:#fff; border-color:#fff; background:#000; }
+  :root[data-theme="contrast"] .bar.now, :root[data-theme="contrast"] .bar.now small { background:#ffff00; color:#000; opacity:1; }
+  :root[data-theme="contrast"] .bar.start small { background:#ffff00; color:#000; }
+  :root[data-theme="contrast"] .card, :root[data-theme="contrast"] .sheet-panel { border:2px solid #fff; }
+  :root[data-theme="contrast"] .bar small, :root[data-theme="contrast"] label, :root[data-theme="contrast"] #songState, :root[data-theme="contrast"] #status, :root[data-theme="contrast"] .meta, :root[data-theme="contrast"] :root[data-theme="contrast"] p, :root[data-theme="contrast"] #pianoDist, :root[data-theme="contrast"] .zones h3 { opacity:1 !important; }
+  :root[data-theme="contrast"] a, :root[data-theme="contrast"] summary { color:#ffff00; }
+  :root[data-theme="contrast"] .dial-b { color:#ffff00; } :root[data-theme="contrast"] .dial-b:active:not(:disabled) { background:#ffff00; color:#000; }
+  :root[data-theme="contrast"] input[type=range] { accent-color:#ffff00; }
+  :root[data-theme="contrast"] .sheet-back { background:rgba(0,0,0,.85); }
+  button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, .dial:focus-visible, summary:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
+  :root[data-theme="contrast"] :focus-visible { outline:4px solid #fff; outline-offset:3px; box-shadow:0 0 0 2px #000; }
   * { box-sizing: border-box; }
   body { margin:0; font:16px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
   main { max-width: 900px; margin: 0 auto; padding: 14px; }
   h1 { font-size: 1.25rem; margin: 6px 0 12px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
-  label { display:block; font-size:.85rem; margin-bottom:2px; opacity:.8; }
-  textarea, select, input[type=number] { width:100%; font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  :root { --ctl: 2.75rem; }
+  [hidden] { display:none !important; }
+  label { display:block; font-size:.8rem; margin:0 0 3px; opacity:.8; line-height:1.2; }
+  textarea, select, input[type=number], input[type=text] { width:100%; font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  select, input[type=number], input[type=text] { height:var(--ctl); }
+  .titlebar button, .buttons button, .inline button, .seedbox button { min-height:var(--ctl); padding-top:0; padding-bottom:0; }
   textarea { height: 5.5em; font-family: ui-monospace, monospace; }
-  .row { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin-top:10px; }
+  .grid { display:grid; gap:10px 12px; margin-top:12px; align-items:end; }
+  .g-general { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .g-inst { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); align-items:start; }
+  .field { display:flex; flex-direction:column; min-width:0; }
+  .field .dial, .field select, .field input[type=number] { width:100%; }
+  .seedfield { grid-column: span 2; }
+  .seedbox { display:flex; gap:6px; } .seedbox input { flex:1; min-width:3rem; text-align:center; font-family:ui-monospace, monospace; font-weight:700; } .seedbox button { padding-left:0; padding-right:0; min-width:var(--ctl); }
+  .inst { border:1px solid var(--line); border-radius:10px; padding:8px 10px 10px; margin:0; min-width:0; display:grid; grid-template-columns:1fr 1fr; gap:8px; align-content:start; }
+  .inst legend { padding:0 6px; font-weight:700; font-size:.9rem; }
+  .inst .wide { grid-column:1/-1; }
+  .inst .mute { grid-column:1/-1; display:flex; align-items:center; gap:8px; font-size:.85rem; margin-top:2px; } .inst .mute label { display:inline; margin:0; opacity:1; font-size:.85rem; }
+  .inst details { grid-column:1/-1; margin-top:0; } .inst summary { cursor:pointer; padding:6px 0; }
+  .inst details .grid { margin-top:6px; grid-template-columns:1fr 1fr; }
+  .inst details .grid .full { grid-column:1/-1; }
+  #pianoDist { white-space:pre-line; opacity:.8; font-size:.8rem; }
   .buttons { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:var(--bw) solid var(--accent); background:var(--accent); color:var(--on-accent); cursor:pointer; }
   button.secondary { background:transparent; color:var(--accent); }
   button:disabled { opacity:.45; cursor:default; }
   #beat { margin-left:auto; font:600 1.1rem ui-monospace, monospace; min-width:4.5em; text-align:right; }
-  #bars { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; }
-  .bar { border:1px solid var(--line); border-radius:6px; padding:6px 8px; min-height:3rem; font-weight:600; }
-  .bar small { display:block; font-weight:400; opacity:.6; }
+  #chordCards { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-top:10px; }
+  .bar, .addbar { position:relative; min-height:2.7rem; padding:3px 16px 4px; display:flex; align-items:flex-start; justify-content:center; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); font:inherit; font-weight:700; cursor:pointer; }
+  .bar small { position:absolute; top:3px; left:5px; font-weight:400; font-size:.68rem; line-height:1; opacity:.6; }
+  .bar .chords { display:grid; grid-template-columns:1fr; justify-items:center; gap:0 .4em; font-size:1.7rem; line-height:1.05; width:100%; margin-top:-.04em; }
+  .bar .chords.n2 { grid-template-columns:1fr 1fr; font-size:1.2rem; } .bar .chords.n3, .bar .chords.n4 { grid-template-columns:1fr 1fr; font-size:1.05rem; }
+  .bar.start { box-shadow:inset 5px 0 0 var(--accent); } .bar.start small { background:var(--accent); color:var(--on-accent); padding:2px 4px; border-radius:4px; opacity:1; top:2px; left:8px; }
   .bar.now { background:var(--now); border-color:var(--accent); }
-  #status { font-size:.9rem; margin-top:8px; opacity:.85; } #status.error { color:#c0392b; opacity:1; font-weight:600; }
+  .bar.sel { outline:2px solid var(--accent); }
+  .addbar { display:flex; align-items:center; justify-content:center; font-size:1.6rem; color:var(--accent); border-style:dashed; }
+  #stage { position:fixed; inset:0; z-index:15; display:flex; flex-direction:column; background:var(--bg); padding:8px; }
+  #stage[hidden] { display:none; }
+  .stagebar { display:flex; gap:8px; align-items:center; flex:0 0 auto; padding-bottom:8px; }
+  .stagebar .nm { flex:1; font-weight:700; font-size:1.05rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #stagePlay { font-size:1.15rem; padding:10px 22px; }
+  #stageBeat { font:600 1.1rem ui-monospace, monospace; min-width:3.5em; text-align:right; }
+  #stageCards { flex:1 1 auto; min-height:0; display:grid; gap:8px; }
+  #stageCards .bar { padding:0; min-height:0; overflow:hidden; align-items:center; } #stageCards .bar small { font-size:max(.8rem, calc(var(--fs, 30px) * .3)); top:4px; left:8px; }
+  #stageCards .bar .chords, #stageCards .bar .chords.n2, #stageCards .bar .chords.n3, #stageCards .bar .chords.n4 { font-size:var(--fs, 30px); padding-top:.45em; }
+  .titlebar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .titlebar input[type=text] { flex:1 1 12em; min-width:0; width:auto; }
+  .titlebar select { width:auto; } .titlebar #preset, .titlebar #trSel { flex:1 1 9em; min-width:0; }
+  #songState { font-size:.8rem; opacity:.7; }
+  #playCard { position:sticky; top:0; z-index:5; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+  #plInfo { font-size:.85rem; margin-top:6px; display:none; gap:8px; align-items:center; flex-wrap:wrap; }
+  .sheet { position:fixed; inset:0; z-index:20; display:flex; align-items:flex-end; justify-content:center; }
+  .sheet[hidden] { display:none; }
+  .sheet-back { position:absolute; inset:0; background:rgba(0,0,0,.45); }
+  .sheet-panel { position:relative; width:100%; max-width:900px; max-height:82vh; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:14px 14px 0 0; padding:12px 14px 16px; box-shadow:0 -8px 30px rgba(0,0,0,.35); animation:up .16s ease-out; }
+  @keyframes up { from { transform:translateY(30px); opacity:.4; } to { transform:none; opacity:1; } }
+  .sheet-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .sheet-head h2 { font-size:1.05rem; margin:0; flex:1; }
+  .sheet button { padding:7px 12px; }
+  button.chip { background:var(--bg); color:var(--fg); border:1px solid var(--line); padding:6px 10px; }
+  button.chip.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+  .zones { display:grid; grid-template-columns: 1fr 2fr 1fr; gap:10px; margin-top:10px; }
+  .zones h3 { font-size:.8rem; margin:0 0 6px; opacity:.75; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .zone-grid { display:grid; gap:5px; } .zone-grid.c2 { grid-template-columns:1fr 1fr; } .zone-grid.c3 { grid-template-columns:1fr 1fr 1fr; }
+  .zone-grid button { padding:9px 4px; text-align:center; }
+  #chordSheet .sheet-panel { display:flex; flex-direction:column; overflow:hidden; }
+  .sheet-body { overflow:auto; flex:1 1 auto; min-height:0; padding-bottom:4px; }
+  .zone-grid.q { grid-template-columns: repeat(3, 1fr); }
+  #chordPreview { font-size:1.6rem; font-weight:700; min-width:5em; }
+  .seg { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+  .liblist { list-style:none; margin:6px 0 12px; padding:0; }
+  .liblist li { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px solid var(--line); }
+  .liblist li .nm { flex:1 1 10em; font-weight:600; } .liblist li .meta { font-size:.8rem; opacity:.65; }
+  .liblist button { padding:4px 9px; font-size:.85rem; }
+  .sheet h3.sec { margin:12px 0 2px; font-size:.95rem; }
+  @media (max-width: 560px) { .zones { grid-template-columns: 1fr 1.35fr 1fr; gap:6px; } .zone-grid.c3, .zone-grid.q { grid-template-columns: 1fr 1fr; } .zone-grid button { padding:9px 2px; font-size:.82rem; } #chordPreview { font-size:1.25rem; min-width:0; } .sheet-panel { padding:10px 10px 14px; } }
+  #status { font-size:.9rem; margin-top:8px; opacity:.85; } #status.error { color:var(--error); opacity:1; font-weight:600; }
   input[type=range] { width:100%; }
-  .inline { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:10px; font-size:.9rem; }
+  .dial { display:grid; grid-template-columns:var(--ctl) 1fr var(--ctl); align-items:center; min-width:6.5rem; height:var(--ctl); border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--fg); user-select:none; overflow:hidden; }
+  .dial:focus-visible { outline:2px solid var(--accent); }
+  .dial-b { height:100%; min-height:0 !important; padding:0 !important; border:0 !important; border-radius:0; background:transparent; color:var(--accent); font:700 1.5rem/1 system-ui, sans-serif; touch-action:manipulation; }
+  .dial-b:active:not(:disabled) { background:var(--now); } .dial-b:disabled { opacity:.3; }
+  .dial-v { text-align:center; font:700 1.05rem ui-monospace, monospace; }
+  .dial-src { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  .field { position:relative; }
+  :root { --lw:7.6rem; --cw:1.9rem; }
+  .tabs { display:flex; gap:6px; margin:0 0 12px; border-bottom:2px solid var(--line); }
+  .tabs button { background:transparent; color:var(--fg); border:0 !important; border-bottom:4px solid transparent !important; border-radius:8px 8px 0 0; padding:0 18px; min-height:var(--ctl); font-weight:700; }
+  .tabs button[aria-selected="true"] { color:var(--accent); border-bottom-color:var(--accent) !important; }
+  .chk { display:inline-flex; align-items:center; gap:6px; margin:0; opacity:1; font-size:.9rem; }
+  .note { font-size:.85rem; opacity:.8; margin:8px 0 0; }
+  .g-style { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .previewbar { position:sticky; top:0; z-index:5; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+  .previewbar .titlebar > select { flex:1 1 11em; min-width:0; }
+  .previewbar .stp { min-width:9rem; } .stp .dial { width:100%; }
+  .varbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .varbar button { min-height:var(--ctl); } .varbar .lbl { font-weight:700; font-size:.9rem; }
+  .lane h3 { margin:0; font-size:1rem; } .laneHead { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; } .laneHead select { width:auto; } .laneHead button { min-height:var(--ctl); }
+  .gridwrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; background:var(--bg); }
+  .stepgrid { display:grid; position:relative; width:max-content; }
+  .rl { position:sticky; left:0; z-index:2; background:var(--card); font-size:.75rem; padding:0 6px; display:flex; align-items:center; min-height:2.1rem; white-space:nowrap; border-bottom:1px solid var(--line); border-right:2px solid var(--line); }
+  .cell { height:2.1rem; min-height:0 !important; padding:0 !important; border:0 !important; border-bottom:1px solid var(--line) !important; border-left:1px solid color-mix(in srgb, var(--line) 45%, transparent) !important; border-radius:0 !important; background:var(--bg); color:var(--fg); font-size:.8rem; line-height:1; touch-action:manipulation; }
+  .cell.beatline { border-left:1px solid var(--line) !important; } .cell.barline { border-left:3px solid var(--fg) !important; }
+  .cell.infill { background:color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+  .cell.tail { background:color-mix(in srgb, var(--accent) 38%, var(--bg)); }
+  .cell.on { background:var(--accent); color:var(--on-accent); } .cell.on.auto { background:color-mix(in srgb, var(--accent) 75%, var(--fg)); }
+  .cell.on.prob { background-image:repeating-linear-gradient(135deg, transparent 0 4px, rgba(255,255,255,.45) 4px 7px); }
+  .cell.apr-::after { content:'↓'; } .cell.apr\+::after { content:'↑'; }
+  .cell.sel { outline:3px solid var(--fg); outline-offset:-3px; }
+  .playhead { position:absolute; top:0; bottom:0; background:rgba(255,190,0,.28); pointer-events:none; z-index:1; border-left:2px solid #d98a00; }
+  .varbar { margin-bottom:8px; } .varbar .varname { width:9rem; min-height:var(--ctl); } .varbar .chip.fillchip { border-style:dashed; }
+  .octbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; } .octbar button { min-height:var(--ctl); } .octbar .warn { color:var(--error); font-weight:700; }
+  .rl.blk { background:color-mix(in srgb, var(--fg) 22%, var(--card)); } .rl.scale { font-weight:700; } .rl.apr { font-style:italic; }
+  .cell.blk { background:color-mix(in srgb, var(--fg) 9%, var(--bg)); } .cell.blk.on { background:var(--accent); } .cell.blk.tail { background:color-mix(in srgb, var(--accent) 38%, var(--bg)); }
+  .legend { margin-top:8px; }
+  .importpanel { border:1px dashed var(--accent); border-radius:8px; padding:10px; margin-bottom:10px; display:grid; gap:10px; } .importpanel .titlebar button { min-height:var(--ctl); } .impsum p { margin:2px 0; } .impsum .warn { color:var(--error); font-weight:700; }
+  .lane.full { position:fixed; inset:0; z-index:40; margin:0; border-radius:0; overflow:auto; background:var(--card); padding:10px 12px 24px; }
+  .lane.full .laneHead { position:sticky; top:0; z-index:6; background:var(--card); padding:4px 0 8px; margin-bottom:4px; border-bottom:1px solid var(--line); }
+  .lane.full .gridwrap { max-height:none; }
+  body.styfull { overflow:hidden; }
+  .inspector { margin-top:10px; padding-top:8px; border-top:1px solid var(--line); display:grid; gap:10px; }
+  .insprow { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px 12px; }
+  .inspector > button { justify-self:start; min-height:var(--ctl); }
+  :root[data-theme="contrast"] .cell.on { background:#ffff00; color:#000; } :root[data-theme="contrast"] .cell.tail { background:#7f7f00; }
+  :root[data-theme="contrast"] .cell.sel { outline-color:#fff; }
+  .inline { display:flex; gap:12px 16px; flex-wrap:wrap; align-items:center; margin-top:12px; font-size:.9rem; }
   .inline label { display:inline; margin:0; opacity:1; }
   details { margin-top:6px; font-size:.9rem; } code { background:var(--bg); padding:1px 4px; border-radius:4px; }
-  @media (max-width: 560px) { #bars { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { #chordCards { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 900px) { #chordCards { grid-template-columns: repeat(6, 1fr); } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Accompagnement jazz : basse + batterie + piano</h1>
-  <div class="card">
-    <label for="preset">Grille d'exemple</label>
-    <select id="preset"></select>
-    <label for="grid" style="margin-top:10px">Grille d'accords (mesures séparées par <code>|</code>)</label>
-    <textarea id="grid" spellcheck="false"></textarea>
-    <details><summary>Syntaxe</summary>
-      Accords séparés par des espaces : <code>Cm7 F7</code> = 2 accords dans la mesure. <code>%</code> répète la mesure précédente.
-      Position explicite : <code>Cm7[1] F7[2.5]</code> (temps à partir de 1). Basse : <code>C/E</code> (basse pédale). Exemples d'accords :
-      <code>Cmaj7 Dm7 G7 Bb7#11 Am7b5 E7b9 C13 Dm9 Gsus</code>.
-    </details>
-    <div class="row">
-      <div><label>Tempo : <b id="tempoVal">120</b> bpm</label><input id="tempo" type="range" min="50" max="260" value="120"></div>
-      <div><label for="bass">Basse</label><select id="bass"><option value="walking">Walking</option><option value="twofeel">2-feel</option><option value="doublenote">Walking double note</option><option value="doubletime">Walking double time</option><option value="ending">Ending</option><option value="none">Aucune</option></select></div>
-      <div><label for="drums">Batterie</label><select id="drums"></select></div>
-      <div><label for="piano">Piano</label><select id="piano"><option value="none">Aucun</option><option value="comping">Comping jazz</option></select></div>
-      <div><label for="fill">Fill de fin</label><select id="fill"><option value="none">Aucun</option><option value="random">Aléatoire</option><option value="random_rare">Rare</option><option value="always">Toujours</option><option value="break">Break</option></select></div>
-    </div>
-    <div class="row">
-      <div><label>Intensité basse : <b id="bassIntVal">0</b></label><input id="bassInt" type="range" min="-10" max="10" value="0"></div>
-      <div><label>Intensité piano : <b id="pianoIntVal">0</b></label><input id="pianoInt" type="range" min="-10" max="10" value="0"></div>
-      <div><label>Intensité batterie : <b id="drumsIntVal">0</b></label><input id="drumsInt" type="range" min="-10" max="10" value="0"></div>
-      <div><label>Swing selon le tempo : <b id="swingVal">100</b> %</label><input id="swing" type="range" min="0" max="100" value="100"></div>
-      <div><label for="seed">Graine (vide = aléatoire)</label><div style="display:flex;gap:6px"><input id="seed" type="number" min="0"><button id="dice" class="secondary" type="button" title="Tirer une graine">🎲</button></div></div>
-    </div>
-    <div class="row">
-      <div><label>Volume basse</label><input id="bassVol" type="range" min="0" max="150" value="100"></div>
-      <div><label>Volume batterie</label><input id="drumsVol" type="range" min="0" max="150" value="100"></div>
-      <div><label>Volume piano</label><input id="pianoVol" type="range" min="0" max="150" value="100"></div>
-    </div>
-    <div class="inline">
-      <span><input type="checkbox" id="loop" checked> <label for="loop">Boucle</label></span>
-      <span><input type="checkbox" id="countin"> <label for="countin">Décompte 4 temps</label></span>
-      <span><input type="checkbox" id="muteBass"> <label for="muteBass">Muet basse</label></span>
-      <span><input type="checkbox" id="muteDrums"> <label for="muteDrums">Muet batterie</label></span>
-      <span><input type="checkbox" id="mutePiano"> <label for="mutePiano">Muet piano</label></span>
-    </div>
-  </div>
-  <div class="card">
+  <div class="titlebar" style="justify-content:space-between;margin:6px 0 12px"><h1 style="margin:0">Accompagnement jazz : basse + batterie + piano</h1><button id="themeBtn" class="secondary" type="button" title="Changer de thème : clair, sombre, haut contraste">Thème</button></div>
+  <nav class="tabs" role="tablist" aria-label="Sections"><button id="tabSong" role="tab" type="button" aria-selected="true" aria-controls="songTab">Morceau</button><button id="tabStyles" role="tab" type="button" aria-selected="false" aria-controls="stylesTab">Styles</button></nav>
+  <div id="songTab" role="tabpanel" aria-labelledby="tabSong">
+  <div class="card" id="playCard">
     <div class="buttons">
       <button id="play" disabled>▶ Jouer</button>
       <button id="gen" class="secondary" disabled>Régénérer</button>
+      <select id="nbVariants" title="Nombre de versions différentes générées d'un coup" style="width:auto"><option value="1">1 version</option><option value="4" selected>4 versions</option><option value="6">6 versions</option><option value="8">8 versions</option></select>
       <button id="midi" class="secondary" disabled>Exporter en MIDI</button>
+      <button id="midiChain" class="secondary" disabled style="display:none">Exporter l'enchaînement</button>
+      <button id="midiAll" class="secondary" disabled style="display:none">Tout exporter (zip)</button>
       <span id="beat"></span>
     </div>
+    <div id="variants" style="display:none;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center"></div>
+    <div id="chainBox" class="inline" style="display:none"><span><input type="checkbox" id="chain" checked> <label for="chain">Enchaîner les versions (1, 2, 3… puis on recommence)</label></span></div>
+    <div id="plInfo"><span id="plName"></span><button id="plPrev" class="secondary" type="button" title="Morceau précédent">⏮</button><button id="plNext" class="secondary" type="button" title="Morceau suivant">⏭</button></div>
     <div id="status">…</div>
-    <div id="bars" style="margin-top:10px"></div>
   </div>
-  <p style="font-size:.8rem;opacity:.7">Moteur : port TypeScript de JJSwing (JJazzLab, LGPL-2.1). Son : synthé Web Audio sans échantillons (approximation). Barre d'espace = jouer/arrêter.</p>
+  <div class="card">
+    <div class="titlebar">
+      <input id="songName" type="text" maxlength="80" placeholder="Titre du morceau" aria-label="Titre du morceau">
+      <button id="saveSong" type="button">Enregistrer</button>
+      <button id="newSong" class="secondary" type="button">Nouveau</button>
+      <button id="openLib" class="secondary" type="button">Bibliothèque</button>
+      <button id="openStage" class="secondary" type="button" title="Afficher seulement la grille, en grand, avec le bouton lecture">⛶ Grille plein écran</button>
+    </div>
+    <div class="titlebar" style="margin-top:6px"><select id="preset" style="width:auto" aria-label="Grille d'exemple"></select><select id="meter" style="width:auto" aria-label="Métrique (temps par mesure)" title="Métrique"><option value="3">3/4</option><option value="4" selected>4/4</option><option value="5">5/4</option></select><span id="songState"></span></div>
+    <div class="titlebar" style="margin-top:6px"><span style="font-size:.85rem">Transposer :</span>
+      <button id="trDown" class="secondary" type="button" title="Un demi-ton plus grave" aria-label="Transposer d'un demi-ton vers le grave">−½ ton</button>
+      <button id="trUp" class="secondary" type="button" title="Un demi-ton plus aigu" aria-label="Transposer d'un demi-ton vers l'aigu">+½ ton</button>
+      <select id="trSel" style="width:auto" aria-label="Transposer de"></select>
+      <button id="spell" class="secondary" type="button" title="Écrire les altérations en dièses ou en bémols">♭ / ♯</button></div>
+    <div id="chordCards" aria-label="Grille d'accords"></div>
+    <details><summary>Grille en texte (coller, copier)</summary>
+      <textarea id="grid" spellcheck="false"></textarea>
+      Mesures séparées par <code>|</code> ; plusieurs accords dans une mesure : <code>Cm7 F7</code> ; <code>%</code> répète la mesure précédente ; position explicite <code>F7[2.5]</code> ;
+      basse <code>C/E</code>. Le texte est relu quand vous quittez la zone.
+    </details>
+    <div class="grid g-general">
+      <div class="field"><label for="style">Style</label><select id="style"></select></div>
+      <div class="field"><label for="tempo">Tempo (bpm)</label><input id="tempo" type="range" min="50" max="260" value="120" data-label="Tempo"></div>
+      <div class="field"><label for="fill">Fill de fin</label><select id="fill"><option value="none">Aucun</option><option value="random" selected>Aléatoire</option><option value="random_rare">Rare</option><option value="always">Toujours</option><option value="break">Break</option></select></div>
+      <div class="field jazz-only"><label for="swing">Swing selon tempo (%)</label><input id="swing" type="range" min="0" max="100" value="100" data-label="Swing selon le tempo"></div>
+      <div class="field seedfield"><label for="seed">Graine</label><div class="seedbox"><button id="seedDown" class="secondary" type="button" aria-label="Graine précédente">−</button><input id="seed" type="text" readonly inputmode="none" placeholder="au hasard" aria-label="Graine (vide = au hasard)"><button id="seedUp" class="secondary" type="button" aria-label="Graine suivante">+</button><button id="dice" class="secondary" type="button" title="Tirer une graine au hasard" aria-label="Tirer une graine au hasard">🎲</button><button id="seedClear" class="secondary" type="button" title="Revenir au hasard à chaque génération" aria-label="Graine au hasard">✕</button></div></div>
+    </div>
+    <div class="grid g-inst">
+      <fieldset class="inst"><legend>Basse</legend>
+        <div class="field wide"><label for="bass">Type</label><select id="bass"><option value="walking">Walking</option><option value="twofeel">2-feel</option><option value="doublenote">Walking double note</option><option value="doubletime">Walking double time</option><option value="ending">Ending</option><option value="none">Aucune</option></select></div>
+        <div class="field wide" id="varBassField" hidden><label for="varBass">Variante</label><select id="varBass"></select></div>
+        <div class="field"><label for="bassInt">Intensité</label><input id="bassInt" type="range" min="-10" max="10" value="0" data-label="Intensité basse"></div>
+        <div class="field"><label for="bassVol">Volume</label><input id="bassVol" type="range" min="0" max="150" value="100" data-label="Volume basse"></div>
+        <div class="mute"><input type="checkbox" id="muteBass"> <label for="muteBass">Muet</label></div>
+      </fieldset>
+      <fieldset class="inst"><legend>Batterie</legend>
+        <div class="field wide"><label for="drums">Type</label><select id="drums"></select></div>
+        <div class="field wide" id="varDrumsField" hidden><label for="varDrums">Variante</label><select id="varDrums"></select></div>
+        <div class="field"><label for="drumsInt">Intensité</label><input id="drumsInt" type="range" min="-10" max="10" value="0" data-label="Intensité batterie"></div>
+        <div class="field"><label for="drumsVol">Volume</label><input id="drumsVol" type="range" min="0" max="150" value="100" data-label="Volume batterie"></div>
+        <div class="mute"><input type="checkbox" id="muteDrums"> <label for="muteDrums">Muet</label></div>
+      </fieldset>
+      <fieldset class="inst"><legend>Piano</legend>
+        <div class="field wide"><label for="piano">Type</label><select id="piano"><option value="none">Aucun</option><option value="comping" selected>Comping jazz</option></select></div>
+        <div class="field wide" id="varKeysField" hidden><label for="varKeys">Variante</label><select id="varKeys"></select></div>
+        <div class="field"><label for="pianoInt">Intensité</label><input id="pianoInt" type="range" min="-10" max="10" value="0" data-label="Intensité piano"></div>
+        <div class="field"><label for="pianoVol">Volume</label><input id="pianoVol" type="range" min="0" max="150" value="100" data-label="Volume piano"></div>
+        <div class="mute"><input type="checkbox" id="mutePiano"> <label for="mutePiano">Muet</label></div>
+        <details class="jazz-only"><summary>Réglages du comping (frappes, approches)</summary>
+          <div class="grid" id="pianoSampling">
+            <div class="field full"><label for="pianoMode">Motifs</label><select id="pianoMode"><option value="sampled" selected>Quelques frappes tirées dans les motifs</option><option value="patterns">Motifs joués en entier</option></select></div>
+            <div class="field"><label for="pianoNotes">Frappes par mesure</label><input id="pianoNotes" type="range" min="0" max="3" step="0.1" value="1.1" data-label="Frappes par mesure (moyenne)"></div>
+            <div class="field"><label for="pianoRise">Montée en fin de cycle</label><input id="pianoRise" type="range" min="0" max="2" step="0.1" value="0.5" data-label="Montée en fin de cycle"></div>
+            <div class="field full"><label for="pianoCycle">Cycle</label><select id="pianoCycle"><option value="2">2 mesures</option><option value="4">4 mesures</option><option value="8" selected>8 mesures</option></select></div>
+            <div class="field full"><label for="pianoApproach">Approches (accord de passage)</label><select id="pianoApproach"><option value="none">Aucune</option><option value="chromatic">Chromatiques (demi-ton)</option><option value="mixed" selected>Chromatiques + dominantes</option><option value="all">Toutes (+ diatoniques, selon la gamme d'accord)</option></select></div>
+            <div class="field full"><label for="pianoApproachEvery">Au moins une approche toutes les</label><select id="pianoApproachEvery"><option value="0">Pas de minimum</option><option value="2">2 mesures</option><option value="4" selected>4 mesures</option><option value="8">8 mesures</option></select></div>
+            <div class="field full"><label for="pianoApproachProb">Fréquence des approches (%)</label><input id="pianoApproachProb" type="range" min="0" max="100" step="5" value="40" data-label="Fréquence des approches"></div>
+            <div class="full"><div id="pianoDist"></div></div>
+          </div>
+        </details>
+      </fieldset>
+    </div>
+    <div class="inline">
+      <span><input type="checkbox" id="loop" checked> <label for="loop">Boucle</label></span>
+      <button id="countin" class="secondary" type="button" data-n="0" title="Décompte avant la lecture : cliquer pour changer (aucun, 1 mesure, 2 mesures)">Décompte : non</button>
+    </div>
+  </div>
+  </div>
+  <div id="stylesTab" role="tabpanel" aria-labelledby="tabStyles" hidden></div>
+  <p style="font-size:.8rem;opacity:.7">Librement inspiré de <b>JJazzLab</b> (Jerome Lelasseux, LGPL) et construit sur son travail : le moteur est un portage TypeScript de JJSwing — merci à lui et aux contributeurs. Son : synthé Web Audio sans échantillons (approximation). Barre d'espace = jouer/arrêter.</p>
 </main>
+<div id="stage" hidden role="dialog" aria-label="Grille plein écran">
+  <div class="stagebar">
+    <button id="stageClose" class="secondary" type="button" aria-label="Quitter le plein écran">✕</button>
+    <span class="nm" id="stageName"></span>
+    <button id="stagePrev" class="secondary" type="button" style="display:none" title="Morceau précédent">⏮</button>
+    <button id="stagePlay" type="button" disabled>▶ Jouer</button>
+    <button id="stageNext" class="secondary" type="button" style="display:none" title="Morceau suivant">⏭</button>
+    <span id="stageBeat"></span>
+  </div>
+  <div id="stageCards" aria-label="Grille d'accords en grand"></div>
+</div>
+<div id="chordSheet" class="sheet" hidden><div class="sheet-back" data-close></div><div class="sheet-panel" role="dialog" aria-modal="true" aria-label="Éditeur d'accord"></div></div>
+<div id="libSheet" class="sheet" hidden><div class="sheet-back" data-close></div><div class="sheet-panel" role="dialog" aria-modal="true" aria-label="Bibliothèque"></div></div>
 <script src="app.js"></script>
 </body>
 </html>
