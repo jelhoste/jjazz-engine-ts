@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accompagnement jazz (moteur JJSwing en TypeScript)</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#1d2733">
+<style>
+  :root { color-scheme: light dark; --bg:#f4f1ea; --fg:#1d2733; --card:#fff; --line:#d8d2c4; --accent:#b4531c; --now:#ffe2b8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161c24; --fg:#e8e4da; --card:#1f2833; --line:#34404f; --accent:#e08a4a; --now:#5a3a1c; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 900px; margin: 0 auto; padding: 14px; }
+  h1 { font-size: 1.25rem; margin: 6px 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
+  label { display:block; font-size:.85rem; margin-bottom:2px; opacity:.8; }
+  textarea, select, input[type=number] { width:100%; font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  textarea { height: 5.5em; font-family: ui-monospace, monospace; }
+  .row { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin-top:10px; }
+  .buttons { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  #beat { margin-left:auto; font:600 1.1rem ui-monospace, monospace; min-width:4.5em; text-align:right; }
+  #bars { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; }
+  .bar { border:1px solid var(--line); border-radius:6px; padding:6px 8px; min-height:3rem; font-weight:600; }
+  .bar small { display:block; font-weight:400; opacity:.6; }
+  .bar.now { background:var(--now); border-color:var(--accent); }
+  #status { font-size:.9rem; margin-top:8px; opacity:.85; } #status.error { color:#c0392b; opacity:1; font-weight:600; }
+  input[type=range] { width:100%; }
+  .inline { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:10px; font-size:.9rem; }
+  .inline label { display:inline; margin:0; opacity:1; }
+  details { margin-top:6px; font-size:.9rem; } code { background:var(--bg); padding:1px 4px; border-radius:4px; }
+  @media (max-width: 560px) { #bars { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Accompagnement jazz : basse + batterie</h1>
+  <div class="card">
+    <label for="preset">Grille d'exemple</label>
+    <select id="preset"></select>
+    <label for="grid" style="margin-top:10px">Grille d'accords (mesures séparées par <code>|</code>)</label>
+    <textarea id="grid" spellcheck="false"></textarea>
+    <details><summary>Syntaxe</summary>
+      Accords séparés par des espaces : <code>Cm7 F7</code> = 2 accords dans la mesure. <code>%</code> répète la mesure précédente.
+      Position explicite : <code>Cm7[1] F7[2.5]</code> (temps à partir de 1). Basse : <code>C/E</code> (basse pédale). Exemples d'accords :
+      <code>Cmaj7 Dm7 G7 Bb7#11 Am7b5 E7b9 C13 Dm9 Gsus</code>.
+    </details>
+    <div class="row">
+      <div><label>Tempo : <b id="tempoVal">120</b> bpm</label><input id="tempo" type="range" min="50" max="260" value="120"></div>
+      <div><label for="bass">Basse</label><select id="bass"><option value="walking">Walking</option><option value="twofeel">2-feel</option><option value="none">Aucune</option></select></div>
+      <div><label for="drums">Batterie</label><select id="drums"></select></div>
+      <div><label for="fill">Fill de fin</label><select id="fill"><option value="none">Aucun</option><option value="random">Aléatoire</option><option value="random_rare">Rare</option><option value="always">Toujours</option><option value="break">Break</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Intensité basse : <b id="bassIntVal">0</b></label><input id="bassInt" type="range" min="-10" max="10" value="0"></div>
+      <div><label>Intensité batterie : <b id="drumsIntVal">0</b></label><input id="drumsInt" type="range" min="-10" max="10" value="0"></div>
+      <div><label>Swing selon le tempo : <b id="swingVal">100</b> %</label><input id="swing" type="range" min="0" max="100" value="100"></div>
+      <div><label for="seed">Graine (vide = aléatoire)</label><div style="display:flex;gap:6px"><input id="seed" type="number" min="0"><button id="dice" class="secondary" type="button" title="Tirer une graine">🎲</button></div></div>
+    </div>
+    <div class="row">
+      <div><label>Volume basse</label><input id="bassVol" type="range" min="0" max="150" value="100"></div>
+      <div><label>Volume batterie</label><input id="drumsVol" type="range" min="0" max="150" value="100"></div>
+    </div>
+    <div class="inline">
+      <span><input type="checkbox" id="loop" checked> <label for="loop">Boucle</label></span>
+      <span><input type="checkbox" id="countin"> <label for="countin">Décompte 4 temps</label></span>
+      <span><input type="checkbox" id="muteBass"> <label for="muteBass">Muet basse</label></span>
+      <span><input type="checkbox" id="muteDrums"> <label for="muteDrums">Muet batterie</label></span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="buttons">
+      <button id="play" disabled>▶ Jouer</button>
+      <button id="gen" class="secondary" disabled>Régénérer</button>
+      <button id="midi" class="secondary" disabled>Exporter en MIDI</button>
+      <span id="beat"></span>
+    </div>
+    <div id="status">…</div>
+    <div id="bars" style="margin-top:10px"></div>
+  </div>
+  <p style="font-size:.8rem;opacity:.7">Moteur : port TypeScript de JJSwing (JJazzLab, LGPL-2.1). Son : synthé Web Audio sans échantillons (approximation). Barre d'espace = jouer/arrêter.</p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
