@@ -67,6 +67,8 @@ function readRequest() {
         drumsIntensity: Number($('drumsInt').value),
         fill: $('fill').value,
         swingIntensity: Number($('swing').value) / 100,
+        piano: $('piano').value === 'comping',
+        pianoIntensity: Number($('pianoInt').value),
         seed: $('seed').value.trim() === '' ? undefined : Number($('seed').value),
     };
 }
@@ -77,7 +79,7 @@ function generate() {
         const t = performance.now();
         current = engine.generate(readRequest());
         renderBars(current.bars);
-        setStatus(`${current.nbBars} mesures générées en ${Math.round(performance.now() - t)} ms : ${current.bass.size()} notes de basse, ${current.drums.size()} notes de batterie.`);
+        setStatus(`${current.nbBars} mesures générées en ${Math.round(performance.now() - t)} ms : ${current.bass.size()} notes de basse, ${current.drums.size()} notes de batterie${current.piano.isEmpty() ? '' : `, ${current.piano.size()} notes de piano`}.`);
         $('midi').disabled = false;
         return true;
     }
@@ -96,13 +98,15 @@ async function play() {
         return;
     if (!current)
         return;
-    const ev = (0, accompaniment_exports_1.buildPlayEvents)(current.bass, current.drums);
+    const ev = (0, accompaniment_exports_1.buildPlayEvents)(current.bass, current.drums, current.piano);
     player.setOptions({
         loop: $('loop').checked,
         muteBass: $('muteBass').checked,
         muteDrums: $('muteDrums').checked,
+        mutePiano: $('mutePiano').checked,
         bassVolume: Number($('bassVol').value) / 100,
         drumsVolume: Number($('drumsVol').value) / 100,
+        pianoVolume: Number($('pianoVol').value) / 100,
         countInBeats: $('countin').checked ? 4 : 0,
     });
     $('play').textContent = '■ Stop';
@@ -119,7 +123,7 @@ function stop() {
 function downloadMidi() {
     if (!current)
         return;
-    const bytes = (0, accompaniment_exports_1.buildMidiFile)(current.bass, current.drums, current.tempo, 'JJazz engine TS', -(0, accompaniment_exports_1.getLeadInBeats)((0, accompaniment_exports_1.buildPlayEvents)(current.bass, current.drums)));
+    const bytes = (0, accompaniment_exports_1.buildMidiFile)(current.bass, current.drums, current.tempo, 'JJazz engine TS', -(0, accompaniment_exports_1.getLeadInBeats)((0, accompaniment_exports_1.buildPlayEvents)(current.bass, current.drums, current.piano)), current.piano);
     const blob = new Blob([bytes], { type: 'audio/midi' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -148,7 +152,7 @@ function init() {
     for (const [v, label] of DRUMS_LABELS)
         drums.add(new Option(label, String(v)));
     drums.value = String(index_1.DrumsStyle.RIDE_1);
-    for (const [id, out] of [['tempo', 'tempoVal'], ['bassInt', 'bassIntVal'], ['drumsInt', 'drumsIntVal'], ['swing', 'swingVal']]) {
+    for (const [id, out] of [['tempo', 'tempoVal'], ['bassInt', 'bassIntVal'], ['drumsInt', 'drumsIntVal'], ['pianoInt', 'pianoIntVal'], ['swing', 'swingVal']]) {
         const el = $(id);
         el.addEventListener('input', () => ($(out).textContent = el.value));
     }
@@ -157,10 +161,10 @@ function init() {
         void play(); });
     $('play').addEventListener('click', () => void play());
     $('midi').addEventListener('click', downloadMidi);
-    for (const id of ['muteBass', 'muteDrums', 'bassVol', 'drumsVol']) {
+    for (const id of ['muteBass', 'muteDrums', 'mutePiano', 'bassVol', 'drumsVol', 'pianoVol']) {
         $(id).addEventListener('input', () => player.setOptions({
-            muteBass: $('muteBass').checked, muteDrums: $('muteDrums').checked,
-            bassVolume: Number($('bassVol').value) / 100, drumsVolume: Number($('drumsVol').value) / 100,
+            muteBass: $('muteBass').checked, muteDrums: $('muteDrums').checked, mutePiano: $('mutePiano').checked,
+            bassVolume: Number($('bassVol').value) / 100, drumsVolume: Number($('drumsVol').value) / 100, pianoVolume: Number($('pianoVol').value) / 100,
         }));
     }
     document.addEventListener('keydown', (e) => {
@@ -243,6 +247,9 @@ __exportStar(__req("jjswing/accentProcessor"), exports);
 __exportStar(__req("jjswing/bassGenerator"), exports);
 __exportStar(__req("jjswing/tilingPhraseBuilder"), exports);
 __exportStar(__req("jjswing/twoFeelPhraseBuilder"), exports);
+__exportStar(__req("jjswing/walkingDoubleNotePhraseBuilder"), exports);
+__exportStar(__req("jjswing/walkingDoubleTimePhraseBuilder"), exports);
+__exportStar(__req("jjswing/endingPhraseBuilder"), exports);
 __exportStar(__req("jjswing/drumKit"), exports);
 __exportStar(__req("jjswing/drumsStyle"), exports);
 __exportStar(__req("jjswing/dpSource"), exports);
@@ -7782,6 +7789,9 @@ const constants_1 = __req("jjswing/constants");
 const grid_1 = __req("jjswing/grid");
 const walkingPhraseBuilder_1 = __req("jjswing/walkingPhraseBuilder");
 const twoFeelPhraseBuilder_1 = __req("jjswing/twoFeelPhraseBuilder");
+const walkingDoubleNotePhraseBuilder_1 = __req("jjswing/walkingDoubleNotePhraseBuilder");
+const walkingDoubleTimePhraseBuilder_1 = __req("jjswing/walkingDoubleTimePhraseBuilder");
+const endingPhraseBuilder_1 = __req("jjswing/endingPhraseBuilder");
 /** Valeur "break" du paramètre Fill (RP_SYS_Fill.VALUE_BREAK) */
 exports.FILL_VALUE_BREAK = 'break';
 class BassGenerator {
@@ -7791,6 +7801,9 @@ class BassGenerator {
         this.builders = new Map();
         this.builders.set(bassStyle_1.BassStyle.WALKING, new walkingPhraseBuilder_1.WalkingPhraseBuilder(db));
         this.builders.set(bassStyle_1.BassStyle.TWO_FEEL, new twoFeelPhraseBuilder_1.TwoFeelPhraseBuilder(db));
+        this.builders.set(bassStyle_1.BassStyle.WALKING_DOUBLE_NOTE, new walkingDoubleNotePhraseBuilder_1.WalkingDoubleNotePhraseBuilder(db));
+        this.builders.set(bassStyle_1.BassStyle.WALKING_DOUBLE_TIME, new walkingDoubleTimePhraseBuilder_1.WalkingDoubleTimePhraseBuilder(db));
+        this.builders.set(bassStyle_1.BassStyle.ENDING, new endingPhraseBuilder_1.EndingPhraseBuilder());
         this.builders.set(bassStyle_1.BassStyle.INTRO, { build: () => new phrase_1.Phrase(0) }); // pas de basse
     }
     /** Génère la phrase de basse (positions absolues en temps, voir l'en-tête) */
@@ -8032,6 +8045,212 @@ class TwoFeelPhraseBuilder {
     }
 }
 exports.TwoFeelPhraseBuilder = TwoFeelPhraseBuilder;
+
+};
+__defs["jjswing/walkingDoubleNotePhraseBuilder"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WalkingDoubleNotePhraseBuilder = void 0;
+/**
+ * Port de WalkingDoubleNotePhraseBuilder : phrase de basse BassStyle.WALKING_DOUBLE_NOTE.
+ * Délègue à un WalkingPhraseBuilder puis, pour chaque mesure « standard » (1 accord, ou 2 accords dont le 2e au temps 3),
+ * remplace les notes par 4 noires : la note du temps 1 (+ répétée au temps 2) et la note du temps 3 (+ répétée au temps 4).
+ *
+ * Différences avec le Java : la base est un paramètre du constructeur ; Math.random() devient random() (aléa injectable).
+ */
+const chordType_1 = __req("chordType");
+const floatRange_1 = __req("floatRange");
+const intRange_1 = __req("intRange");
+const phrase_1 = __req("phrase");
+const bassPostProcess_1 = __req("jjswing/bassPostProcess");
+const constants_1 = __req("jjswing/constants");
+const random_1 = __req("jjswing/random");
+const walkingPhraseBuilder_1 = __req("jjswing/walkingPhraseBuilder");
+class WalkingDoubleNotePhraseBuilder {
+    constructor(db) {
+        /** Journal optionnel */
+        this.log = null;
+        this.walking = new walkingPhraseBuilder_1.WalkingPhraseBuilder(db);
+    }
+    build(scsList, tempo) {
+        const p = this.walking.build(scsList, tempo);
+        for (const scs of scsList) {
+            const barRange = scs.getBarRange();
+            const nbBeats = scs.getTimeSignature().nbNaturalBeats;
+            for (const bar of barRange) {
+                const barStartBeatPos = scs.getStartBeatPosition() + (bar - barRange.from) * nbBeats;
+                const barScs = scs.subSequence(new intRange_1.IntRange(bar, bar), true);
+                if (barScs.size() > 2 || (barScs.size() === 2 && barScs.last().position.beat !== 2))
+                    continue; // cas non standard : walking normal
+                const cliCs0 = barScs.first();
+                const cliCs2 = barScs.size() === 1 ? null : barScs.last();
+                const fr0 = new floatRange_1.FloatRange(Math.max(0, barStartBeatPos - constants_1.NON_QUANTIZED_WINDOW), barStartBeatPos + 2 - constants_1.NON_QUANTIZED_WINDOW);
+                const p0 = p.subSet(fr0, true);
+                if (p0.length === 0) {
+                    this.log?.(`build() No note found in first half of bar=${bar}`);
+                    continue;
+                }
+                let ne0 = p0[0];
+                const beatPos0 = ne0.positionInBeats < barStartBeatPos + constants_1.NON_QUANTIZED_WINDOW ? ne0.positionInBeats : barStartBeatPos;
+                if (cliCs0.data.getChord().indexOfRelativePitch(ne0.pitch) === -1) {
+                    this.log?.(`build() bar ${bar}: non chordtone starting note`);
+                    continue; // note inhabituelle : walking normal
+                }
+                ne0 = (0, phrase_1.noteWith)(ne0, { durationInBeats: 0.9, positionInBeats: beatPos0 }, false);
+                const ne1 = (0, phrase_1.noteWith)(ne0, { positionInBeats: barStartBeatPos + 1 }, false);
+                const fr2 = new floatRange_1.FloatRange(barStartBeatPos + 2 - constants_1.NON_QUANTIZED_WINDOW, barStartBeatPos + 4 - constants_1.NON_QUANTIZED_WINDOW);
+                const p2 = p.subSet(fr2, true);
+                if (p2.length === 0) {
+                    this.log?.(`build() No note found in second half of bar=${bar}`);
+                    continue;
+                }
+                let ne2 = p2[0];
+                let ne2pitch = cliCs2 === null ? ne2.pitch : (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(ne2, cliCs2.data.getBassNote().getRelativePitch());
+                if (cliCs2 === null && cliCs0.data.getChord().indexOfRelativePitch(ne2pitch) === -1) {
+                    // Arrive un peu trop souvent : on force parfois une autre note
+                    if ((0, random_1.random)() > 0.6)
+                        ne2pitch = this.findBassNote(cliCs0, ne0);
+                    else
+                        continue;
+                }
+                if (ne0.pitch === ne2pitch)
+                    ne2pitch = this.findBassNote(cliCs2 === null ? cliCs0 : cliCs2, ne0); // note répétée : une autre note
+                const beatPos2 = ne2.positionInBeats < barStartBeatPos + 2 + constants_1.NON_QUANTIZED_WINDOW ? ne2.positionInBeats : barStartBeatPos + 2;
+                ne2 = (0, phrase_1.noteWith)(ne2, { pitch: ne2pitch, durationInBeats: 0.9, positionInBeats: beatPos2 }, false);
+                const ne3 = (0, phrase_1.noteWith)(ne2, { positionInBeats: barStartBeatPos + 3 }, false);
+                p.removeAll([...p0]);
+                p.removeAll([...p2]);
+                p.addAll([ne0, ne1, ne2, ne3]);
+            }
+        }
+        return p;
+    }
+    /** Une note de basse convenable pour cliCs, différente de la note interdite */
+    findBassNote(cliCs, forbiddenTargetNote) {
+        const forbiddenPitch = forbiddenTargetNote.pitch;
+        const ecs = cliCs.data;
+        let res = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, ecs.getBassNote().getRelativePitch());
+        if (res === forbiddenPitch && ecs.isSlashChord()) {
+            res = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, ecs.getRootNote().getRelativePitch());
+        }
+        if (res === forbiddenPitch) {
+            const relPitch5th = ecs.getRelativePitchAt(chordType_1.DegreeIndex.FIFTH);
+            const relPitch3rd = ecs.getRelativePitchAt(chordType_1.DegreeIndex.THIRD_OR_FOURTH);
+            if (relPitch5th === -1 && relPitch3rd === -1) {
+                // pas d'autre degré : on garde res
+            }
+            else if (relPitch5th === -1) {
+                res = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, relPitch3rd);
+            }
+            else if (relPitch3rd === -1) {
+                res = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, relPitch5th);
+            }
+            else {
+                const res5th = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, relPitch5th);
+                const res3rd = (0, bassPostProcess_1.getClosestAndAcceptableBassPitch)(forbiddenTargetNote, relPitch3rd);
+                res = Math.abs(res3rd - forbiddenPitch) < Math.abs(res5th - forbiddenPitch) ? res3rd : res5th;
+            }
+        }
+        return res;
+    }
+}
+exports.WalkingDoubleNotePhraseBuilder = WalkingDoubleNotePhraseBuilder;
+
+};
+__defs["jjswing/walkingDoubleTimePhraseBuilder"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WalkingDoubleTimePhraseBuilder = void 0;
+/**
+ * Port de WalkingDoubleTimePhraseBuilder : phrase de basse BassStyle.WALKING_DOUBLE_TIME.
+ * Principe : la grille est étirée x2 (chaque mesure devient 2 mesures), on construit un WALKING_DOUBLE_NOTE dessus, on adapte
+ * le swing à un tempo double, puis on ramène la phrase à l'échelle (positions et durées / 2) : 8 notes par mesure d'origine.
+ */
+const floatRange_1 = __req("floatRange");
+const intRange_1 = __req("intRange");
+const phrase_1 = __req("phrase");
+const position_1 = __req("position");
+const simpleChordSequence_1 = __req("simpleChordSequence");
+const timeSignature_1 = __req("timeSignature");
+const bassGeneratorSettings_1 = __req("jjswing/bassGeneratorSettings");
+const swingBassTempoAdapter_1 = __req("jjswing/swingBassTempoAdapter");
+const swingProfile_1 = __req("jjswing/swingProfile");
+const walkingDoubleNotePhraseBuilder_1 = __req("jjswing/walkingDoubleNotePhraseBuilder");
+class WalkingDoubleTimePhraseBuilder {
+    constructor(db) {
+        this.doubleNote = new walkingDoubleNotePhraseBuilder_1.WalkingDoubleNotePhraseBuilder(db);
+    }
+    build(scsList, tempo) {
+        const expanded = this.getExpandedSimpleChordSequences(scsList);
+        const p = this.doubleNote.build(expanded, tempo);
+        if (expanded.length > 0) {
+            const beatRange = new floatRange_1.FloatRange(expanded[0].getBeatRange().from, expanded[expanded.length - 1].getBeatRange().to);
+            const intensity = bassGeneratorSettings_1.BassGeneratorSettings.getInstance().getSwingProfileIntensity();
+            const adapter = new swingBassTempoAdapter_1.SwingBassTempoAdapter(swingProfile_1.SwingProfile.create(intensity), timeSignature_1.TimeSignature.FOUR_FOUR);
+            adapter.adaptToTempo(p, beatRange, () => true, 2 * tempo);
+        }
+        // Retour à l'échelle d'origine
+        p.processNotes(() => true, (ne) => (0, phrase_1.noteWith)(ne, { durationInBeats: ne.durationInBeats / 2, positionInBeats: ne.positionInBeats / 2 }, false));
+        return p;
+    }
+    /** Grilles étirées x2 : chaque mesure d'origine devient 2 mesures, les accords gardent leur place relative */
+    getExpandedSimpleChordSequences(scsList) {
+        return scsList.map((scs) => {
+            const br = scs.getBarRange();
+            const res = new simpleChordSequence_1.SimpleChordSequence(new intRange_1.IntRange(br.from * 2, br.to * 2 + 1), scs.getStartBeatPosition() * 2, scs.getTimeSignature());
+            const nbBeats = scs.getTimeSignature().nbNaturalBeats;
+            for (const cli of scs) {
+                let newBar = cli.position.bar * 2;
+                let newBeat = cli.position.beat * 2;
+                if (newBeat >= nbBeats) {
+                    newBar++;
+                    newBeat -= nbBeats;
+                }
+                res.add(cli.getCopy(null, new position_1.Position(newBar, newBeat)));
+            }
+            return res;
+        });
+    }
+}
+exports.WalkingDoubleTimePhraseBuilder = WalkingDoubleTimePhraseBuilder;
+
+};
+__defs["jjswing/endingPhraseBuilder"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.EndingPhraseBuilder = void 0;
+exports.getBasicBassPhrase = getBasicBassPhrase;
+/**
+ * Port de EndingPhraseBuilder : phrase de basse BassStyle.ENDING. Une note par accord (sa note de basse) pendant toute la durée
+ * de l'accord, avec une vélocité aléatoire dans [60;63] (DummyGenerator.getBasicBassPhrase en Java).
+ */
+const intRange_1 = __req("intRange");
+const phrase_1 = __req("phrase");
+const instrumentFamily_1 = __req("jjswing/instrumentFamily");
+const random_1 = __req("jjswing/random");
+/** Port de DummyGenerator.getBasicBassPhrase : pour chaque accord, sa basse pendant la durée de l'accord (moins 0,1 temps) */
+function getBasicBassPhrase(scs, velocityRange, channel) {
+    if (velocityRange.isEmpty())
+        throw new Error(`velocityRange=${velocityRange}`);
+    const p = new phrase_1.Phrase(channel, false);
+    for (const cli of scs) {
+        const pitch = (0, instrumentFamily_1.toAbsolutePitch)(instrumentFamily_1.InstrumentFamily.Bass, cli.data.getBassNote().getRelativePitch());
+        const br = scs.getBeatRangeOf(cli);
+        const velocity = velocityRange.from + Math.round((0, random_1.random)() * (velocityRange.size() - 1));
+        p.add({ pitch, durationInBeats: br.size() - 0.1, velocity: Math.max(0, Math.min(127, velocity)), positionInBeats: br.from });
+    }
+    return p;
+}
+class EndingPhraseBuilder {
+    build(scsList, tempo) {
+        void tempo;
+        const res = new phrase_1.Phrase(0);
+        for (const scs of scsList)
+            res.addPhrase(getBasicBassPhrase(scs, new intRange_1.IntRange(60, 63), 0));
+        return res;
+    }
+}
+exports.EndingPhraseBuilder = EndingPhraseBuilder;
 
 };
 __defs["jjswing/drumsStyle"]=function(exports,module,__req){
@@ -8617,6 +8836,11 @@ const bassStyle_1 = __req("jjswing/bassStyle");
 const drumsGenerator_1 = __req("jjswing/drumsGenerator");
 const random_1 = __req("jjswing/random");
 const wbpSourceAdaptation_1 = __req("jjswing/wbpSourceAdaptation");
+const compingGenerator_1 = __req("comping/compingGenerator");
+const BASS_STYLES = {
+    walking: bassStyle_1.BassStyle.WALKING, twofeel: bassStyle_1.BassStyle.TWO_FEEL, doublenote: bassStyle_1.BassStyle.WALKING_DOUBLE_NOTE,
+    doubletime: bassStyle_1.BassStyle.WALKING_DOUBLE_TIME, ending: bassStyle_1.BassStyle.ENDING,
+};
 class ChordGridError extends Error {
     constructor(message, barIndex) {
         super(message);
@@ -8651,9 +8875,11 @@ function parseChordGrid(text, ts = timeSignature_1.TimeSignature.FOUR_FOUR) {
 }
 /** Les deux bases de phrases sources et les générateurs. Construire une seule fois (le chargement prend environ une seconde). */
 class AccompanimentEngine {
-    constructor(wbpDb, dpDb) {
+    /** @param compingPatterns motifs de comping (défaut : motifs provisoires intégrés) */
+    constructor(wbpDb, dpDb, compingPatterns) {
         this.wbpDb = wbpDb;
         this.dpDb = dpDb;
+        this.compingGenerator = new compingGenerator_1.CompingGenerator(compingPatterns);
         this.bassGenerator = new bassGenerator_1.BassGenerator(wbpDb);
         this.drumsGenerator = new drumsGenerator_1.DrumsGenerator(dpDb);
     }
@@ -8674,7 +8900,7 @@ class AccompanimentEngine {
             if (req.bass !== 'none') {
                 const part = {
                     barRange,
-                    bassStyle: req.bass === 'walking' ? bassStyle_1.BassStyle.WALKING : bassStyle_1.BassStyle.TWO_FEEL,
+                    bassStyle: BASS_STYLES[req.bass],
                     intensity: req.bassIntensity ?? 0,
                     fill,
                 };
@@ -8685,7 +8911,11 @@ class AccompanimentEngine {
                 const part = { barRange, drumsStyle: req.drumsStyle, intensity: req.drumsIntensity ?? 0, fill };
                 drums = this.drumsGenerator.generate({ chords, parts: [part], timeSignature: ts, tempo: req.tempo }).drums;
             }
-            return { bass, drums, tempo: req.tempo, timeSignature: ts, nbBars: bars.length, lengthBeats: bars.length * ts.nbNaturalBeats, bars };
+            let piano = new phrase_1.Phrase(1);
+            if (req.piano) {
+                piano = this.compingGenerator.generate({ chords: chords.clone(), parts: [{ barRange, intensity: req.pianoIntensity ?? 0 }], timeSignature: ts, tempo: req.tempo, channel: 1 });
+            }
+            return { bass, drums, piano, tempo: req.tempo, timeSignature: ts, nbBars: bars.length, lengthBeats: bars.length * ts.nbNaturalBeats, bars };
         }
         finally {
             if (req.seed !== undefined)
@@ -8697,17 +8927,379 @@ class AccompanimentEngine {
 exports.AccompanimentEngine = AccompanimentEngine;
 
 };
+__defs["comping/compingGenerator"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CompingGenerator = void 0;
+const floatRange_1 = __req("floatRange");
+const phrase_1 = __req("phrase");
+const phrases_1 = __req("phrases");
+const simpleChordSequence_1 = __req("simpleChordSequence");
+const timeSignature_1 = __req("timeSignature");
+const bassPostProcess_1 = __req("jjswing/bassPostProcess");
+const random_1 = __req("jjswing/random");
+const compingPattern_1 = __req("comping/compingPattern");
+const voiceLeading_1 = __req("comping/voiceLeading");
+const voicings_1 = __req("comping/voicings");
+const BASE_VELOCITY = 68;
+const ANTICIPATION_WINDOW = 0.75;
+class CompingGenerator {
+    constructor(patterns = compingPattern_1.BUILTIN_PATTERNS) {
+        this.patterns = patterns;
+        if (patterns.length === 0)
+            throw new Error('aucun motif');
+    }
+    generate(input) {
+        const { chords, parts, timeSignature: ts, tempo } = input;
+        if (ts !== timeSignature_1.TimeSignature.FOUR_FOUR)
+            throw new Error('le comping ne gère que le 4/4');
+        if (!chords.hasChordAtBeginning())
+            throw new Error('Missing chord symbol at the start of the chord sequence');
+        const barRange = chords.getBarRange();
+        this.checkParts(parts, barRange);
+        const nbBeats = ts.nbNaturalBeats;
+        // Accords -> plages en temps (absolues)
+        const work = chords.clone();
+        work.removeRedundantStandardChords();
+        const scs = simpleChordSequence_1.SimpleChordSequence.fromChordSequence(work, barRange.from * nbBeats, ts);
+        const spans = scs.toArray().map((cli) => {
+            const br = scs.getBeatRangeOf(cli);
+            return { ecs: cli.data, from: br.from, to: br.to };
+        });
+        // Un voicing par accord
+        const candidates = spans.map((s) => (0, voicings_1.getVoicingCandidates)(s.ecs));
+        const chosen = (0, voiceLeading_1.chooseVoicings)(candidates);
+        const voicings = spans.map((_, i) => candidates[i][chosen[i]]);
+        // Rythme
+        const res = new phrase_1.Phrase(input.channel ?? 1);
+        const endBeat = (barRange.to + 1) * nbBeats;
+        let previousId = '';
+        for (const part of parts) {
+            let bar = part.barRange.from;
+            while (bar <= part.barRange.to) {
+                const pattern = this.pickPattern(part.intensity, part.barRange.to - bar + 1, previousId);
+                previousId = pattern.id;
+                for (const hit of pattern.hits) {
+                    const t = bar * nbBeats + hit.beat;
+                    this.addHit(res, spans, voicings, t, hit.duration, hit.accent ?? 0, endBeat);
+                }
+                bar += pattern.bars;
+            }
+        }
+        for (const part of parts) {
+            (0, bassPostProcess_1.processIntensity)(res, new floatRange_1.FloatRange(part.barRange.from * nbBeats, (part.barRange.to + 1) * nbBeats), part.intensity);
+        }
+        (0, bassPostProcess_1.processSwingFeelTempoAdapter)(res, new floatRange_1.FloatRange(barRange.from * nbBeats, endBeat), tempo, ts);
+        (0, phrases_1.fixOverlappedNotes)(res);
+        return res;
+    }
+    // ---------------------------------------------------------------------------------------------
+    checkParts(parts, br) {
+        if (parts.length === 0)
+            throw new Error('parts vide');
+        let bar = br.from;
+        for (const part of parts) {
+            if (part.barRange.from !== bar)
+                throw new Error(`parts non contiguës ou ne démarrant pas à la mesure ${br.from} : ${part.barRange}`);
+            bar = part.barRange.to + 1;
+        }
+        if (bar - 1 !== br.to)
+            throw new Error(`parts ne couvrent pas ${br}`);
+    }
+    /** Tirage pondéré : densité visée selon l'intensité, motif précédent défavorisé, motifs de 2 mesures seulement s'il reste la place */
+    pickPattern(intensity, barsLeft, previousId) {
+        const target = intensity <= -4 ? 1 : intensity >= 4 ? 3 : 2;
+        const eligible = this.patterns.filter((p) => p.bars <= barsLeft);
+        const pool = eligible.length > 0 ? eligible : this.patterns.filter((p) => p.bars === 1);
+        if (pool.length === 0)
+            throw new Error('aucun motif d\'une mesure disponible');
+        const weights = pool.map((p) => {
+            const w = Math.abs(p.density - target) === 0 ? 1 : Math.abs(p.density - target) === 1 ? 0.25 : 0.03;
+            return p.id === previousId ? w * 0.1 : w;
+        });
+        let r = (0, random_1.random)() * weights.reduce((a, b) => a + b, 0);
+        for (let i = 0; i < pool.length; i++) {
+            r -= weights[i];
+            if (r <= 0)
+                return pool[i];
+        }
+        return pool[pool.length - 1];
+    }
+    addHit(res, spans, voicings, t, duration, accent, endBeat) {
+        if (t >= endBeat - 0.01)
+            return;
+        let i = spans.findIndex((s) => t >= s.from - 1e-6 && t < s.to - 1e-6);
+        if (i === -1)
+            return;
+        const frac = t - Math.floor(t);
+        let anticipated = false;
+        if (frac >= 0.5 && i + 1 < spans.length && spans[i + 1].from - t <= ANTICIPATION_WINDOW + 1e-6 && spans[i + 1].from > t) {
+            i++;
+            anticipated = true;
+        }
+        const span = spans[i];
+        let dur = duration;
+        if (!anticipated)
+            dur = Math.min(dur, span.to - t - 0.05);
+        dur = Math.min(dur, endBeat - t - 0.05);
+        if (dur < 0.1)
+            return;
+        const v = voicings[i];
+        v.forEach((pitch, k) => {
+            let velocity = BASE_VELOCITY + accent + Math.round(((0, random_1.random)() - 0.5) * 6);
+            if (k === v.length - 1)
+                velocity += 5; // voix haute en avant
+            else if (k === 0)
+                velocity -= 4;
+            res.add({ pitch, durationInBeats: dur, velocity: Math.max(1, Math.min(127, velocity)), positionInBeats: t });
+        });
+    }
+}
+exports.CompingGenerator = CompingGenerator;
+
+};
+__defs["comping/compingPattern"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BUILTIN_PATTERNS = void 0;
+exports.patternsFromJson = patternsFromJson;
+const T = 2 / 3; // contre-temps swing
+const p = (id, bars, density, hits) => ({
+    id, bars, density, source: 'provisional', hits: hits.map(([beat, duration, accent]) => ({ beat, duration, accent })),
+});
+/** Motifs provisoires (à remplacer ou compléter par le répertoire de l'utilisateur) */
+exports.BUILTIN_PATTERNS = [
+    p('charleston', 1, 2, [[0, 1.4, 6], [1 + T, 0.6]]),
+    p('and-of-2', 1, 1, [[1 + T, 0.9, 4]]),
+    p('hold-1', 1, 1, [[0, 2.6, 4]]),
+    p('and-2-and-4', 1, 2, [[1 + T, 0.5, 4], [3 + T, 0.5, 2]]),
+    p('backbeat', 1, 2, [[1, 0.7, 2], [3, 0.7, 2]]),
+    p('push-dense', 1, 3, [[0, 0.9, 4], [1 + T, 0.5], [2 + T, 0.5], [3 + T, 0.5, 2]]),
+    p('syncopated', 1, 3, [[T, 0.5], [1 + T, 0.5], [3, 0.7, 4], [3 + T, 0.4]]),
+    p('garland-2', 2, 2, [[1 + T, 0.5], [3, 0.8, 4], [5 + T, 0.5], [7, 0.5, 2]]),
+    p('charleston-answer', 2, 2, [[0, 1.4, 6], [1 + T, 0.6], [5, 0.7], [7 + T, 0.5, 2]]),
+    p('sparse-2', 2, 1, [[0, 1.8, 4], [5 + T, 0.8]]),
+];
+/** Lit des motifs depuis un JSON { patterns: CompingPattern[] } (format produit par l'import MuseScore) */
+function patternsFromJson(json) {
+    return json.patterns.map((pt) => {
+        if (pt.bars !== 1 && pt.bars !== 2)
+            throw new Error(`motif ${pt.id} : bars=${pt.bars}`);
+        if (![1, 2, 3].includes(pt.density))
+            throw new Error(`motif ${pt.id} : density=${pt.density}`);
+        for (const h of pt.hits) {
+            if (!(h.beat >= 0 && h.beat < pt.bars * 4 && h.duration > 0))
+                throw new Error(`motif ${pt.id} : frappe invalide ${JSON.stringify(h)}`);
+        }
+        return pt;
+    });
+}
+
+};
+__defs["comping/voiceLeading"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.TARGET_CENTER = void 0;
+exports.staticCost = staticCost;
+exports.transitionCost = transitionCost;
+exports.chooseVoicings = chooseVoicings;
+/**
+ * Enchaînement des voix : choisit un voicing par accord en minimisant le mouvement total (programmation dynamique de Viterbi,
+ * donc optimum sur toute la progression et non glouton). ORIGINAL.
+ * Coût de transition : distance entre voix alignées par le haut (la voix haute pèse plus et ne doit pas sauter),
+ * pénalité pour les sauts > 4 demi-tons et pour une différence de nombre de notes.
+ * Coût statique : centre de gravité proche de 61, voix haute dans [64 ; 74], pas de note sous 50.
+ */
+const random_1 = __req("jjswing/random");
+exports.TARGET_CENTER = 61;
+function staticCost(v) {
+    const mean = v.reduce((a, b) => a + b, 0) / v.length;
+    const top = v[v.length - 1];
+    let c = Math.abs(mean - exports.TARGET_CENTER) * 0.5;
+    if (top > 74)
+        c += (top - 74) * 1.5;
+    if (top < 64)
+        c += (64 - top) * 1.5;
+    if (v[0] < 50)
+        c += (50 - v[0]) * 1.5;
+    return c + (v.length >= 4 ? 0 : 1.5); // préférence légère pour 4 notes
+}
+function transitionCost(prev, next) {
+    const n = Math.min(prev.length, next.length);
+    let c = Math.abs(prev.length - next.length) * 2;
+    for (let i = 0; i < n; i++) {
+        const d = Math.abs(prev[prev.length - 1 - i] - next[next.length - 1 - i]);
+        c += (i === 0 ? 1.6 : 1) * d;
+        if (d > 4)
+            c += (i === 0 ? 3 : 1.5) * (d - 4);
+    }
+    return c;
+}
+/**
+ * @param candidates pour chaque accord, ses voicings candidats (non vide)
+ * @param noise amplitude du bruit aléatoire ajouté aux coûts (variété selon la graine ; 0 = déterministe)
+ * @returns l'index choisi pour chaque accord
+ */
+function chooseVoicings(candidates, noise = 0.6) {
+    const n = candidates.length;
+    if (n === 0)
+        return [];
+    for (const c of candidates)
+        if (c.length === 0)
+            throw new Error('un accord n\'a aucun voicing candidat');
+    const own = candidates.map((cs) => cs.map((v) => staticCost(v) + (0, random_1.random)() * noise));
+    const best = [own[0].slice()];
+    const from = [];
+    for (let i = 1; i < n; i++) {
+        const row = [];
+        const back = [];
+        for (let j = 0; j < candidates[i].length; j++) {
+            let bestCost = Infinity;
+            let bestK = 0;
+            for (let k = 0; k < candidates[i - 1].length; k++) {
+                const c = best[i - 1][k] + transitionCost(candidates[i - 1][k], candidates[i][j]);
+                if (c < bestCost) {
+                    bestCost = c;
+                    bestK = k;
+                }
+            }
+            row.push(bestCost + own[i][j]);
+            back.push(bestK);
+        }
+        best.push(row);
+        from.push(back);
+    }
+    const res = new Array(n);
+    let j = best[n - 1].indexOf(Math.min(...best[n - 1]));
+    for (let i = n - 1; i >= 0; i--) {
+        res[i] = j;
+        if (i > 0)
+            j = from[i - 1][j];
+    }
+    return res;
+}
+
+};
+__defs["comping/voicings"]=function(exports,module,__req){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.VOICING_HIGH = exports.VOICING_LOW = void 0;
+exports.getChordRoles = getChordRoles;
+exports.getVoicingStacks = getVoicingStacks;
+exports.getVoicingCandidates = getVoicingCandidates;
+/**
+ * Voicings de piano de comping jazz (ORIGINAL : JJazzLab n'a pas d'équivalent).
+ * Principe : jeu sans fondamentale (la basse la joue). Empilements de bas en haut :
+ *   - 4 notes : tierce - quinte (ou 13e) - septième - neuvième ; ses renversements sont les voicings « A » (départ sur la tierce)
+ *     et « B » (départ sur la septième : septième - neuvième - tierce - quinte) ;
+ *   - 3 notes (« shells ») : tierce - septième - neuvième, et septième - tierce - quinte (ou 13e).
+ * Chaque empilement est proposé dans tous ses renversements, plus la variante « drop 2 » (2e voix du haut descendue d'une octave,
+ * voicing plus ouvert), dans la tessiture [low ; high]. Les degrés viennent du ChordType :
+ * une altération présente dans l'accord (b9, #9, b13, b5...) remplace la couleur naturelle.
+ */
+const chordType_1 = __req("chordType");
+exports.VOICING_LOW = 46; // Sib2 (Do central = 60)
+exports.VOICING_HIGH = 76;
+const mod12 = (n) => ((n % 12) + 12) % 12;
+function getChordRoles(ecs) {
+    const root = ecs.getRootNote().getRelativePitch();
+    const third = ecs.getRelativePitchAt(chordType_1.DegreeIndex.THIRD_OR_FOURTH);
+    const fifth = ecs.getRelativePitchAt(chordType_1.DegreeIndex.FIFTH);
+    const seventh = ecs.getRelativePitchAt(chordType_1.DegreeIndex.SIXTH_OR_SEVENTH);
+    const exts = [chordType_1.DegreeIndex.EXTENSION1, chordType_1.DegreeIndex.EXTENSION2, chordType_1.DegreeIndex.EXTENSION3].map((di) => ecs.getRelativePitchAt(di)).filter((p) => p !== -1);
+    const rel = (p) => mod12(p - root);
+    // Neuvième : celle de l'accord (b9, 9, #9) si présente, sinon la neuvième naturelle
+    const ninthInChord = exts.find((p) => [1, 2, 3].includes(rel(p)));
+    const ninth = ninthInChord !== undefined ? ninthInChord : mod12(root + 2);
+    // Treizième : celle de l'accord (b13, 13) si présente ; naturelle seulement sur une dominante dont la quinte est juste
+    const thirteenthInChord = exts.find((p) => [8, 9].includes(rel(p)));
+    const isDominant = ecs.getChordType().family === chordType_1.Family.SEVENTH;
+    let fifthOr13 = fifth;
+    if (thirteenthInChord !== undefined)
+        fifthOr13 = thirteenthInChord;
+    else if (isDominant && (fifth === -1 || rel(fifth) === 7))
+        fifthOr13 = mod12(root + 9);
+    return { root, third, fifth, seventh, ninth, fifthOr13 };
+}
+/** Rôles empilés de bas en haut pour les 2 familles, sans doublon de pitch relatif ; au moins 3 notes */
+function getVoicingStacks(r) {
+    const clean = (pcs) => {
+        const res = [];
+        for (const p of pcs)
+            if (p !== -1 && !res.includes(p))
+                res.push(p);
+        return res;
+    };
+    const stacks = [
+        clean([r.third, r.fifthOr13, r.seventh, r.ninth]),
+        clean([r.third, r.seventh, r.ninth]),
+        clean([r.seventh, r.third, r.fifthOr13]),
+    ];
+    return stacks.map((s) => {
+        // Accord pauvre (triade) : on complète avec la fondamentale puis la quinte
+        for (const extra of [r.fifth, r.root])
+            if (s.length < 3 && extra !== -1 && !s.includes(extra))
+                s.push(extra);
+        return s;
+    }).filter((s) => s.length >= 3);
+}
+/** Empile les pitchs relatifs vers le haut à partir de lowest (le 1er pitch est le plus bas) */
+function stackUp(pcs, lowest) {
+    const res = [lowest];
+    for (let i = 1; i < pcs.length; i++) {
+        let p = res[i - 1] + 1;
+        while (mod12(p) !== pcs[i])
+            p++;
+        res.push(p);
+    }
+    return res;
+}
+/** Tous les voicings candidats (notes triées par hauteur) dans la tessiture, sans doublon */
+function getVoicingCandidates(ecs, low = exports.VOICING_LOW, high = exports.VOICING_HIGH) {
+    const stacks = getVoicingStacks(getChordRoles(ecs));
+    const seen = new Set();
+    const res = [];
+    for (const stack of stacks) {
+        for (let rot = 0; rot < stack.length; rot++) {
+            const pcs = [...stack.slice(rot), ...stack.slice(0, rot)];
+            for (let start = low; start <= high; start++) {
+                if (mod12(start) !== pcs[0])
+                    continue;
+                const closed = stackUp(pcs, start);
+                // Position serrée, puis drop 2 (seulement pour 4 notes : la 2e voix du haut descend d'une octave)
+                const variants = [closed];
+                if (closed.length >= 4)
+                    variants.push([...closed.slice(0, closed.length - 2).concat(closed[closed.length - 1]), closed[closed.length - 2] - 12].sort((a, b) => a - b));
+                for (const notes of variants) {
+                    if (notes[0] < low || notes[notes.length - 1] > high || notes[notes.length - 1] - notes[0] > 17)
+                        continue;
+                    const key = notes.join(',');
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        res.push(notes);
+                    }
+                }
+            }
+        }
+    }
+    return res;
+}
+
+};
 __defs["playback/events"]=function(exports,module,__req){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildPlayEvents = buildPlayEvents;
 exports.getLeadInBeats = getLeadInBeats;
-function buildPlayEvents(bass, drums) {
+function buildPlayEvents(bass, drums, piano) {
     const res = [];
     for (const ne of bass.notes)
         res.push({ beat: ne.positionInBeats, durationBeats: ne.durationInBeats, pitch: ne.pitch, velocity: ne.velocity, track: 'bass' });
     for (const ne of drums.notes)
         res.push({ beat: ne.positionInBeats, durationBeats: ne.durationInBeats, pitch: ne.pitch, velocity: ne.velocity, track: 'drums' });
+    if (piano)
+        for (const ne of piano.notes)
+            res.push({ beat: ne.positionInBeats, durationBeats: ne.durationInBeats, pitch: ne.pitch, velocity: ne.velocity, track: 'piano' });
     res.sort((a, b) => a.beat - b.beat);
     return res;
 }
@@ -8762,7 +9354,7 @@ function notesTrack(p, channel, program, name, shiftBeats) {
  * @param leadInBeats décalage ajouté aux positions (utiliser -getLeadInBeats pour que les notes jouées un peu avant le temps 0 ne
  * soient pas écrasées à 0)
  */
-function buildMidiFile(bass, drums, tempo, title = 'JJazz engine TS', leadInBeats = 0) {
+function buildMidiFile(bass, drums, tempo, title = 'JJazz engine TS', leadInBeats = 0, piano) {
     const usPerBeat = Math.round(60000000 / tempo);
     const t0 = track([
         { tick: 0, order: 0, bytes: meta(0x03, ascii(title)) },
@@ -8770,6 +9362,8 @@ function buildMidiFile(bass, drums, tempo, title = 'JJazz engine TS', leadInBeat
         { tick: 0, order: 2, bytes: meta(0x58, [4, 2, 24, 8]) }, // 4/4
     ]);
     const tracks = [t0, notesTrack(bass, 0, 32, 'Bass', leadInBeats), notesTrack(drums, 9, null, 'Drums', leadInBeats)];
+    if (piano && !piano.isEmpty())
+        tracks.push(notesTrack(piano, 1, 0, 'Piano', leadInBeats));
     return Uint8Array.from([...ascii('MThd'), ...u32(6), ...u16(1), ...u16(tracks.length), ...u16(exports.MIDI_PPQ), ...tracks.flat()]);
 }
 
@@ -8792,6 +9386,36 @@ class Synth {
         const d = this.noise.getChannelData(0);
         for (let i = 0; i < len; i++)
             d[i] = Math.random() * 2 - 1;
+    }
+    /** Piano électrique très simple (provisoire : une soundfont le remplacera) : sinus + harmonique 2 qui s'éteint vite, enveloppe percussive */
+    piano(dest, when, pitch, velocity, durSec) {
+        const ctx = this.ctx;
+        const f = midiToFreq(pitch);
+        const vol = 0.05 + 0.18 * (velocity / 127);
+        const end = when + Math.max(0.1, durSec);
+        const o1 = ctx.createOscillator();
+        o1.type = 'sine';
+        o1.frequency.value = f;
+        const o2 = ctx.createOscillator();
+        o2.type = 'triangle';
+        o2.frequency.value = f * 2;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0.5, when);
+        g2.gain.exponentialRampToValueAtTime(0.02, when + 0.25);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, when);
+        g.gain.linearRampToValueAtTime(vol, when + 0.004);
+        g.gain.exponentialRampToValueAtTime(vol * 0.35, when + Math.min(0.6, durSec * 0.8 + 0.05));
+        g.gain.setValueAtTime(vol * 0.3, Math.max(when + 0.01, end - 0.04));
+        g.gain.exponentialRampToValueAtTime(0.0001, end + 0.08);
+        o1.connect(g);
+        o2.connect(g2);
+        g2.connect(g);
+        g.connect(dest);
+        o1.start(when);
+        o2.start(when);
+        o1.stop(end + 0.15);
+        o2.stop(end + 0.15);
     }
     /** Basse : triangle + sinus une octave plus bas, filtre passe-bas qui s'ouvre à l'attaque, enveloppe pincée */
     bass(dest, when, pitch, velocity, durSec) {
@@ -8946,6 +9570,7 @@ class Player {
         this.master = null;
         this.bassBus = null;
         this.drumsBus = null;
+        this.pianoBus = null;
         this.timer = null;
         this.t0 = 0;
         this.events = [];
@@ -8954,7 +9579,7 @@ class Player {
         this.leadIn = 0;
         this.spb = 0.5;
         this.lengthBeats = 0;
-        this.opts = { loop: true, muteBass: false, muteDrums: false, bassVolume: 1, drumsVolume: 1, countInBeats: 0 };
+        this.opts = { loop: true, muteBass: false, muteDrums: false, mutePiano: false, bassVolume: 1, drumsVolume: 1, pianoVolume: 1, countInBeats: 0 };
         this.playing = false;
     }
     isPlaying() { return this.playing; }
@@ -8964,6 +9589,8 @@ class Player {
             this.bassBus.gain.value = this.opts.muteBass ? 0 : this.opts.bassVolume;
         if (this.drumsBus)
             this.drumsBus.gain.value = this.opts.muteDrums ? 0 : this.opts.drumsVolume;
+        if (this.pianoBus)
+            this.pianoBus.gain.value = this.opts.mutePiano ? 0 : this.opts.pianoVolume;
     }
     /** Position courante en temps depuis le début de la grille (modulo la longueur si boucle), ou -1 si à l'arrêt ou pendant le décompte */
     currentBeat() {
@@ -8988,6 +9615,8 @@ class Player {
             this.bassBus.connect(this.master);
             this.drumsBus = this.ctx.createGain();
             this.drumsBus.connect(this.master);
+            this.pianoBus = this.ctx.createGain();
+            this.pianoBus.connect(this.master);
         }
         await this.ctx.resume();
         this.setOptions({});
@@ -9026,6 +9655,8 @@ class Player {
                 if (when >= this.ctx.currentTime - 0.02) {
                     if (e.track === 'bass')
                         this.synth.bass(this.bassBus, Math.max(when, this.ctx.currentTime), e.pitch, e.velocity, e.durationBeats * this.spb);
+                    else if (e.track === 'piano')
+                        this.synth.piano(this.pianoBus, Math.max(when, this.ctx.currentTime), e.pitch, e.velocity, e.durationBeats * this.spb);
                     else
                         this.synth.drum(this.drumsBus, Math.max(when, this.ctx.currentTime), e.pitch, e.velocity);
                 }
@@ -9043,13 +9674,15 @@ class Player {
         this.playing = false;
         // Coupe le son en cours en recréant les bus
         if (this.ctx && this.master) {
-            const old = [this.bassBus, this.drumsBus];
+            const old = [this.bassBus, this.drumsBus, this.pianoBus];
             for (const b of old)
                 b?.disconnect();
             this.bassBus = this.ctx.createGain();
             this.bassBus.connect(this.master);
             this.drumsBus = this.ctx.createGain();
             this.drumsBus.connect(this.master);
+            this.pianoBus = this.ctx.createGain();
+            this.pianoBus.connect(this.master);
             this.setOptions({});
         }
     }

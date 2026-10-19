@@ -38,7 +38,7 @@
 </head>
 <body>
 <main>
-  <h1>Accompagnement jazz : basse + batterie</h1>
+  <h1>Accompagnement jazz : basse + batterie + piano</h1>
   <div class="card">
     <label for="preset">Grille d'exemple</label>
     <select id="preset"></select>
@@ -51,12 +51,14 @@
     </details>
     <div class="row">
       <div><label>Tempo : <b id="tempoVal">120</b> bpm</label><input id="tempo" type="range" min="50" max="260" value="120"></div>
-      <div><label for="bass">Basse</label><select id="bass"><option value="walking">Walking</option><option value="twofeel">2-feel</option><option value="none">Aucune</option></select></div>
+      <div><label for="bass">Basse</label><select id="bass"><option value="walking">Walking</option><option value="twofeel">2-feel</option><option value="doublenote">Walking double note</option><option value="doubletime">Walking double time</option><option value="ending">Ending</option><option value="none">Aucune</option></select></div>
       <div><label for="drums">Batterie</label><select id="drums"></select></div>
+      <div><label for="piano">Piano</label><select id="piano"><option value="none">Aucun</option><option value="comping">Comping jazz</option></select></div>
       <div><label for="fill">Fill de fin</label><select id="fill"><option value="none">Aucun</option><option value="random">Aléatoire</option><option value="random_rare">Rare</option><option value="always">Toujours</option><option value="break">Break</option></select></div>
     </div>
     <div class="row">
       <div><label>Intensité basse : <b id="bassIntVal">0</b></label><input id="bassInt" type="range" min="-10" max="10" value="0"></div>
+      <div><label>Intensité piano : <b id="pianoIntVal">0</b></label><input id="pianoInt" type="range" min="-10" max="10" value="0"></div>
       <div><label>Intensité batterie : <b id="drumsIntVal">0</b></label><input id="drumsInt" type="range" min="-10" max="10" value="0"></div>
       <div><label>Swing selon le tempo : <b id="swingVal">100</b> %</label><input id="swing" type="range" min="0" max="100" value="100"></div>
       <div><label for="seed">Graine (vide = aléatoire)</label><div style="display:flex;gap:6px"><input id="seed" type="number" min="0"><button id="dice" class="secondary" type="button" title="Tirer une graine">🎲</button></div></div>
@@ -64,12 +66,14 @@
     <div class="row">
       <div><label>Volume basse</label><input id="bassVol" type="range" min="0" max="150" value="100"></div>
       <div><label>Volume batterie</label><input id="drumsVol" type="range" min="0" max="150" value="100"></div>
+      <div><label>Volume piano</label><input id="pianoVol" type="range" min="0" max="150" value="100"></div>
     </div>
     <div class="inline">
       <span><input type="checkbox" id="loop" checked> <label for="loop">Boucle</label></span>
       <span><input type="checkbox" id="countin"> <label for="countin">Décompte 4 temps</label></span>
       <span><input type="checkbox" id="muteBass"> <label for="muteBass">Muet basse</label></span>
       <span><input type="checkbox" id="muteDrums"> <label for="muteDrums">Muet batterie</label></span>
+      <span><input type="checkbox" id="mutePiano"> <label for="mutePiano">Muet piano</label></span>
     </div>
   </div>
   <div class="card">
