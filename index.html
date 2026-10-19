@@ -252,9 +252,19 @@
       <button id="countin" class="secondary" type="button" data-n="0" title="Décompte avant la lecture : cliquer pour changer (aucun, 1 mesure, 2 mesures)">Décompte : non</button>
     </div>
   </div>
+  <details class="card" id="audioCard"><summary>Son : synthé léger ou SoundFont</summary>
+    <div class="grid" style="margin-top:8px">
+      <div class="field"><label for="audioEngine">Moteur sonore</label><select id="audioEngine"><option value="synth">Synthé léger (sans téléchargement)</option><option value="soundfont">SoundFont GeneralUser GS (≈ 32 Mo, une fois)</option></select></div>
+      <div class="field"><label for="sfBass">Basse (SoundFont)</label><select id="sfBass"><option value="auto">Automatique (contrebasse en jazz, électrique sinon)</option><option value="32">Contrebasse</option><option value="33">Basse électrique (doigts)</option><option value="34">Basse électrique (médiator)</option><option value="35">Basse fretless</option><option value="36">Basse slap</option><option value="38">Basse synthé</option></select></div>
+      <div class="field"><label for="sfPiano">Claviers (SoundFont)</label><select id="sfPiano"><option value="0">Piano à queue</option><option value="1">Piano clair</option><option value="2">Piano électrique à queue</option><option value="4">Piano électrique (Rhodes)</option><option value="5">Piano électrique 2 (DX)</option><option value="7">Clavinet</option><option value="16">Orgue</option><option value="24">Guitare nylon</option><option value="26">Guitare jazz</option><option value="27">Guitare électrique claire</option></select></div>
+      <div class="field"><label for="sfKit">Batterie (SoundFont)</label><select id="sfKit"><option value="auto">Automatique (kit jazz en jazz, standard sinon)</option><option value="0">Standard</option><option value="8">Room</option><option value="16">Power</option><option value="24">Électronique</option><option value="32">Jazz</option><option value="40">Balais</option></select></div>
+    </div>
+    <p id="sfStatus" class="note" role="status"></p>
+    <p class="note">La SoundFont est téléchargée une seule fois puis gardée sur l'appareil ; tant qu'elle n'est pas prête, le synthé léger joue.</p>
+  </details>
   </div>
   <div id="stylesTab" role="tabpanel" aria-labelledby="tabStyles" hidden></div>
-  <p style="font-size:.8rem;opacity:.7">Librement inspiré de <b>JJazzLab</b> (Jerome Lelasseux, LGPL) et construit sur son travail : le moteur est un portage TypeScript de JJSwing — merci à lui et aux contributeurs. Son : synthé Web Audio sans échantillons (approximation). Barre d'espace = jouer/arrêter.</p>
+  <p style="font-size:.8rem;opacity:.7">Librement inspiré de <b>JJazzLab</b> (Jerome Lelasseux, LGPL) et construit sur son travail : le moteur est un portage TypeScript de JJSwing — merci à lui et aux contributeurs. Son : synthé Web Audio sans échantillons (approximation), ou la SoundFont <b>GeneralUser GS</b> (S. Christian Collins) jouée par <b>SpessaSynth</b> (Apache-2.0). Barre d'espace = jouer/arrêter.</p>
 </main>
 <div id="stage" hidden role="dialog" aria-label="Grille plein écran">
   <div class="stagebar">

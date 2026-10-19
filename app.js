@@ -1112,6 +1112,8 @@ function generate() {
     }
 }
 async function play() {
+    if (!player.isPlaying())
+        player.unlock(); // synchrone, dans le geste de l'utilisateur
     if (player.isPlaying()) {
         playlist = null;
         updatePlaylistInfo();
@@ -1152,6 +1154,7 @@ async function play() {
         pianoVolume: Number($('pianoVol').value) / 100,
         countInBeats: (!playlist || playlist.index === 0) ? countInBars() * bpb : 0,
         beatsPerBar: bpb,
+        ...soundOptions(),
     });
     setPlayLabel(true);
     await player.start(ev, current.tempo, (chain ? chainLen * variants.length : current.lengthBeats) - startBeat, () => endOfPlayback());
@@ -1363,6 +1366,53 @@ function initTheme() {
         catch { /* ignoré */ }
     });
 }
+// ---------------------------------------------------------------------------------------------------------------------
+// Son : moteur léger ou SoundFont (réglages mémorisés sur l'appareil, pas dans le morceau)
+const AUDIO_KEY = 'jjswing.audio.v1';
+function soundOptions(styled = !!currentStyleDef()) {
+    const bass = val('sfBass'), kit = val('sfKit');
+    return {
+        engine: val('audioEngine') === 'soundfont' ? 'soundfont' : 'synth',
+        bassProgram: bass === 'auto' ? (styled ? 33 : 32) : Number(bass),
+        pianoProgram: Number(val('sfPiano')) || 0,
+        drumKit: kit === 'auto' ? (styled ? 0 : 32) : Number(kit),
+    };
+}
+function initAudio() {
+    try {
+        const raw = localStorage.getItem(AUDIO_KEY);
+        const o = raw ? JSON.parse(raw) : {};
+        for (const id of ['audioEngine', 'sfBass', 'sfPiano', 'sfKit']) {
+            const sel = $(id), v = o[id];
+            if (typeof v === 'string' && Array.from(sel.options).some((x) => x.value === v))
+                sel.value = v;
+        }
+    }
+    catch { /* réglages par défaut */ }
+    player.onSfStatus = (st) => {
+        $('sfStatus').textContent = st.message;
+        if (st.state === 'ready' || st.state === 'error')
+            setStatus(st.state === 'ready' ? 'SoundFont prête.' : st.message, st.state === 'error');
+    };
+    const apply = () => {
+        try {
+            localStorage.setItem(AUDIO_KEY, JSON.stringify(Object.fromEntries(['audioEngine', 'sfBass', 'sfPiano', 'sfKit'].map((id) => [id, val(id)]))));
+        }
+        catch { /* ignoré */ }
+        player.setOptions(soundOptions());
+        if (val('audioEngine') === 'soundfont')
+            void player.prepareSoundFont();
+        else
+            $('sfStatus').textContent = '';
+    };
+    for (const id of ['audioEngine', 'sfBass', 'sfPiano', 'sfKit'])
+        $(id).addEventListener('change', apply);
+    player.setOptions(soundOptions());
+    if (val('audioEngine') === 'soundfont')
+        void player.prepareSoundFont();
+    // Diagnostic (tests d'interface) : niveau de sortie et nombre de notes envoyées à la SoundFont
+    window.jjDebug = { level: () => player.level(), sent: () => player.sf?.sent ?? 0 };
+}
 function init() {
     initTheme();
     store = new songModel_1.LibraryStore(safeStorage());
@@ -1416,7 +1466,9 @@ function init() {
         songGrid: () => (0, songModel_1.gridToText)(editor.bars),
         changed: () => undefined,
         status: setStatus,
+        sound: () => soundOptions(true),
     });
+    initAudio();
     $('tabSong').addEventListener('click', () => showTab('song'));
     $('tabStyles').addEventListener('click', () => showTab('styles'));
     const styleSel = $('style');
@@ -11865,6 +11917,7 @@ exports.Player = exports.Synth = void 0;
  * et un lecteur avec planification en avance (lookahead), boucle et muets. Navigateur uniquement.
  */
 const events_1 = __req("playback/events");
+const soundfont_1 = __req("playback/soundfont");
 const midiToFreq = (pitch) => 440 * Math.pow(2, (pitch - 69) / 12);
 class Synth {
     constructor(ctx) {
@@ -12069,6 +12122,74 @@ class Player {
         this.lengthBeats = 0;
         this.opts = { loop: true, muteBass: false, muteDrums: false, mutePiano: false, bassVolume: 1, drumsVolume: 1, pianoVolume: 1, countInBeats: 0 };
         this.playing = false;
+        this.analyser = null;
+        this.sf = null;
+        /** Appelé à chaque changement d'état du chargement de la SoundFont */
+        this.onSfStatus = () => { };
+    }
+    /** À appeler SYNCHRONEMENT dans le gestionnaire du clic (iPad/Safari : le contexte ne démarre que dans un geste) */
+    unlock() {
+        this.ensureGraph();
+        void this.ctx.resume();
+        const nav = navigator;
+        try {
+            if (nav.audioSession)
+                nav.audioSession.type = 'playback';
+        }
+        catch { /* sans effet */ }
+    }
+    /** Niveau de sortie (RMS 0..1) : diagnostic et tests */
+    level() {
+        if (!this.analyser)
+            return 0;
+        const d = new Float32Array(this.analyser.fftSize);
+        this.analyser.getFloatTimeDomainData(d);
+        let e = 0;
+        for (const x of d)
+            e += x * x;
+        return Math.sqrt(e / d.length);
+    }
+    ensureGraph() {
+        if (this.ctx)
+            return;
+        this.ctx = new AudioContext();
+        this.synth = new Synth(this.ctx);
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.8;
+        const comp = this.ctx.createDynamicsCompressor();
+        this.analyser = this.ctx.createAnalyser();
+        this.analyser.fftSize = 2048;
+        this.master.connect(comp);
+        comp.connect(this.analyser);
+        comp.connect(this.ctx.destination);
+        this.bassBus = this.ctx.createGain();
+        this.bassBus.connect(this.master);
+        this.drumsBus = this.ctx.createGain();
+        this.drumsBus.connect(this.master);
+        this.pianoBus = this.ctx.createGain();
+        this.pianoBus.connect(this.master);
+    }
+    /** Prépare la SoundFont (téléchargement la première fois, puis lecture du cache) ; à appeler au choix du moteur, hors geste */
+    prepareSoundFont() {
+        this.ensureGraph();
+        if (!this.sf)
+            this.sf = new soundfont_1.SoundFont(this.ctx, this.master, (st) => { this.onSfStatus(st); if (st.state === 'ready')
+                this.applySf(); }, undefined);
+        return this.sf.load();
+    }
+    get useSf() { return this.opts.engine === 'soundfont' && !!this.sf && this.sf.ready; }
+    /** Programmes, kit et volumes de canaux de la SoundFont */
+    applySf() {
+        const sf = this.sf;
+        if (!sf || !sf.ready)
+            return;
+        const o = this.opts, vol = (v, mute) => (mute ? 0 : 113 * Math.sqrt(Math.max(0, v)));
+        sf.program(soundfont_1.SF_CH.bass, o.bassProgram ?? 32);
+        sf.program(soundfont_1.SF_CH.piano, o.pianoProgram ?? 0);
+        sf.program(soundfont_1.SF_CH.drums, o.drumKit ?? 0);
+        sf.volume(soundfont_1.SF_CH.bass, vol(o.bassVolume, o.muteBass));
+        sf.volume(soundfont_1.SF_CH.piano, vol(o.pianoVolume, o.mutePiano));
+        sf.volume(soundfont_1.SF_CH.drums, vol(o.drumsVolume, o.muteDrums));
     }
     isPlaying() { return this.playing; }
     setOptions(o) {
@@ -12079,6 +12200,7 @@ class Player {
             this.drumsBus.gain.value = this.opts.muteDrums ? 0 : this.opts.drumsVolume;
         if (this.pianoBus)
             this.pianoBus.gain.value = this.opts.mutePiano ? 0 : this.opts.pianoVolume;
+        this.applySf();
     }
     /** Position courante en temps depuis le début de la grille (modulo la longueur si boucle), ou -1 si à l'arrêt ou pendant le décompte */
     currentBeat() {
@@ -12091,21 +12213,7 @@ class Player {
     }
     async start(events, tempo, lengthBeats, onEnd) {
         this.stop();
-        if (!this.ctx) {
-            this.ctx = new AudioContext();
-            this.synth = new Synth(this.ctx);
-            this.master = this.ctx.createGain();
-            this.master.gain.value = 0.8;
-            const comp = this.ctx.createDynamicsCompressor();
-            this.master.connect(comp);
-            comp.connect(this.ctx.destination);
-            this.bassBus = this.ctx.createGain();
-            this.bassBus.connect(this.master);
-            this.drumsBus = this.ctx.createGain();
-            this.drumsBus.connect(this.master);
-            this.pianoBus = this.ctx.createGain();
-            this.pianoBus.connect(this.master);
-        }
+        this.ensureGraph();
         await this.ctx.resume();
         this.setOptions({});
         this.events = events;
@@ -12141,7 +12249,17 @@ class Player {
                 if (when > horizon)
                     return;
                 if (when >= this.ctx.currentTime - 0.02) {
-                    if (e.track === 'bass')
+                    const at = Math.max(when, this.ctx.currentTime);
+                    if (this.useSf) {
+                        const sf = this.sf, dur = e.durationBeats * this.spb;
+                        if (e.track === 'bass' && !this.opts.muteBass)
+                            sf.note(soundfont_1.SF_CH.bass, e.pitch, e.velocity, at, dur);
+                        else if (e.track === 'piano' && !this.opts.mutePiano)
+                            sf.note(soundfont_1.SF_CH.piano, e.pitch, e.velocity, at, dur);
+                        else if (e.track !== 'bass' && e.track !== 'piano' && !this.opts.muteDrums)
+                            sf.note(soundfont_1.SF_CH.drums, e.pitch, e.velocity, at, 0);
+                    }
+                    else if (e.track === 'bass')
                         this.synth.bass(this.bassBus, Math.max(when, this.ctx.currentTime), e.pitch, e.velocity, e.durationBeats * this.spb);
                     else if (e.track === 'piano')
                         this.synth.piano(this.pianoBus, Math.max(when, this.ctx.currentTime), e.pitch, e.velocity, e.durationBeats * this.spb);
@@ -12152,7 +12270,7 @@ class Player {
             }
         };
         tick();
-        this.timer = window.setInterval(tick, 50);
+        this.timer = window.setInterval(() => { tick(); this.sf?.prune(); }, 50);
     }
     stop() {
         if (this.timer !== null) {
@@ -12160,6 +12278,7 @@ class Player {
             this.timer = null;
         }
         this.playing = false;
+        this.sf?.silence();
         // Coupe le son en cours en recréant les bus
         if (this.ctx && this.master) {
             const old = [this.bassBus, this.drumsBus, this.pianoBus];
@@ -12176,6 +12295,197 @@ class Player {
     }
 }
 exports.Player = Player;
+
+};
+__defs["playback/soundfont"]=function(exports,module,__req){
+"use strict";
+/**
+ * Moteur SoundFont (échantillons) : SpessaSynth (Apache-2.0) dans un AudioWorklet, avec GeneralUser GS (S. Christian Collins).
+ * La bibliothèque et son processeur sont chargés à la demande (web/spessa.js, web/spessasynth_processor.min.js) ; le fichier .sf2 est
+ * téléchargé une fois puis conservé dans IndexedDB. Navigateur uniquement.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SoundFont = exports.SF_CH = exports.SF2_URL = void 0;
+exports.SF2_URL = 'https://jelhoste.github.io/GeneralUser-GS/GeneralUser-GS.sf2';
+class SfError extends Error {
+    constructor(code, msg) {
+        super(msg);
+        this.code = code;
+    }
+}
+const DB = 'jjswing-fonts', STORE = 'files';
+const idb = () => new Promise((res, rej) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+});
+async function cacheGet(key) {
+    try {
+        const db = await idb();
+        return await new Promise((res) => { const q = db.transaction(STORE).objectStore(STORE).get(key); q.onsuccess = () => res(q.result ?? null); q.onerror = () => res(null); });
+    }
+    catch {
+        return null;
+    }
+}
+async function cachePut(key, buf) {
+    try {
+        const db = await idb();
+        await new Promise((res) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(buf, key); tx.oncomplete = () => res(); tx.onerror = () => res(); tx.onabort = () => res(); });
+    }
+    catch { /* repli : pas de cache */ }
+}
+const isSf2 = (b) => { const t = new TextDecoder('ascii').decode(new Uint8Array(b, 0, 12)); return b.byteLength > 1024 && t.startsWith('RIFF') && t.endsWith('sfbk'); };
+function loadScript(src) {
+    return new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = () => res();
+        s.onerror = () => rej(new Error('script'));
+        document.head.appendChild(s);
+    });
+}
+/** Les canaux MIDI utilisés : basse 0, claviers 1, batterie 9 */
+exports.SF_CH = { bass: 0, piano: 1, drums: 9 };
+class SoundFont {
+    constructor(ctx, dest, onStatus, url = exports.SF2_URL) {
+        this.ctx = ctx;
+        this.dest = dest;
+        this.onStatus = onStatus;
+        this.url = url;
+        this.status = { state: 'off', pct: 0, message: '' };
+        this.synth = null;
+        this.loading = null;
+        /** Notes envoyées et dont la fin n'est pas encore passée : pour couper net à l'arrêt */
+        this.pending = [];
+        /** Compteur de notes envoyées (diagnostic, tests) */
+        this.sent = 0;
+    }
+    get ready() { return this.status.state === 'ready'; }
+    set(s) { this.status = s; this.onStatus(s); }
+    /** Charge (une seule fois) le moteur et la SoundFont ; ne lève pas d'erreur : l'état est publié par onStatus */
+    load() {
+        if (!this.loading)
+            this.loading = this.doLoad().catch((e) => {
+                const code = e instanceof SfError ? e.code : 'network';
+                const msg = code === 'format' ? 'Le fichier SoundFont est invalide.' : code === 'unsupported' ? 'Ce navigateur ne gère pas AudioWorklet : synthé léger conservé.'
+                    : code === 'worklet' ? 'Le moteur SoundFont n\'a pas pu démarrer : synthé léger conservé.' : 'SoundFont non téléchargée (réseau) : synthé léger conservé.';
+                this.loading = null;
+                this.set({ state: 'error', pct: 0, message: msg, code });
+            });
+        return this.loading;
+    }
+    async doLoad() {
+        if (!this.ctx.audioWorklet)
+            throw new SfError('unsupported', 'AudioWorklet');
+        this.set({ state: 'loading', pct: 0, message: 'Chargement du moteur…' });
+        try {
+            if (!window.JJSpessa)
+                await loadScript('spessa.js');
+            await this.ctx.audioWorklet.addModule('spessasynth_processor.min.js');
+        }
+        catch {
+            throw new SfError('worklet', 'worklet');
+        }
+        const lib = window.JJSpessa;
+        const synth = new lib.WorkletSynthesizer(this.ctx);
+        synth.connect(this.dest);
+        let buf = await cacheGet(this.url);
+        if (buf && !isSf2(buf))
+            buf = null;
+        if (!buf)
+            buf = await this.download();
+        this.set({ state: 'loading', pct: 100, message: 'Préparation des sons…' });
+        try {
+            await synth.soundBankManager.addSoundBank(buf, 'main');
+            await synth.isReady;
+        }
+        catch {
+            throw new SfError('format', 'sf2');
+        }
+        synth.setSystemParameter('voiceCap', 400);
+        this.synth = synth;
+        this.set({ state: 'ready', pct: 100, message: 'SoundFont prête' });
+    }
+    async download() {
+        let resp;
+        try {
+            resp = await fetch(this.url);
+        }
+        catch {
+            throw new SfError('network', 'fetch');
+        }
+        if (!resp.ok || !resp.body)
+            throw new SfError('network', String(resp.status));
+        const total = Number(resp.headers.get('content-length')) || 0;
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let got = 0;
+        for (;;) {
+            let r;
+            try {
+                r = await reader.read();
+            }
+            catch {
+                throw new SfError('network', 'read');
+            }
+            if (r.done)
+                break;
+            chunks.push(r.value);
+            got += r.value.length;
+            this.set({ state: 'loading', pct: total ? Math.min(99, Math.round((got / total) * 100)) : 0, message: total ? `Chargement… ${Math.min(99, Math.round((got / total) * 100))} %` : `Chargement… ${Math.round(got / 1048576)} Mo` });
+        }
+        const all = new Uint8Array(got);
+        let o = 0;
+        for (const c of chunks) {
+            all.set(c, o);
+            o += c.length;
+        }
+        const buf = all.buffer;
+        if (!isSf2(buf))
+            throw new SfError('format', 'riff');
+        await cachePut(this.url, buf);
+        return buf;
+    }
+    // -------------------------------------------------------------------------------------------------------------------
+    // Jeu
+    program(ch, p) { this.synth?.programChange(ch, p); }
+    /** Volume de canal (CC7), 0..127 */
+    volume(ch, v) { this.synth?.controllerChange(ch, 7, Math.max(0, Math.min(127, Math.round(v)))); }
+    /** Note datée sur l'horloge audio ; `dur` en secondes (0 = percussion : pas de note-off, l'échantillon va au bout) */
+    note(ch, note, vel, when, dur) {
+        const s = this.synth;
+        if (!s)
+            return;
+        s.noteOn(ch, note, Math.max(1, Math.min(127, Math.round(vel))), { time: when });
+        const off = dur > 0 ? when + dur : when + 0.05;
+        if (dur > 0)
+            s.noteOff(ch, note, { time: off });
+        this.pending.push({ ch, note, on: when, off: dur > 0 ? off : when + 3 });
+        this.sent++;
+    }
+    /** Coupe tout : son en cours (coupure immédiate des canaux) et notes déjà planifiées (chacune est éteinte à sa propre date,
+     *  pour ne pas toucher les notes d'une lecture relancée aussitôt) */
+    silence() {
+        const s = this.synth;
+        if (!s)
+            return;
+        const now = this.ctx.currentTime;
+        const chans = new Set([exports.SF_CH.bass, exports.SF_CH.piano, exports.SF_CH.drums]);
+        for (const ch of chans) {
+            s.controllerChange(ch, 120, 0);
+            s.controllerChange(ch, 121, 0);
+        }
+        for (const p of this.pending)
+            if (p.on > now)
+                s.noteOff(p.ch, p.note, { time: p.on + 0.002 });
+        this.pending = [];
+    }
+    /** Oublie les notes passées (appelé régulièrement) */
+    prune() { const now = this.ctx.currentTime; this.pending = this.pending.filter((p) => p.off > now - 0.1); }
+}
+exports.SoundFont = SoundFont;
 
 };
 __defs["comping/index"]=function(exports,module,__req){
@@ -13958,6 +14268,8 @@ class StyleUi {
         return this.progIdx === -1 ? this.host.songGrid() : PROGRESSIONS[this.progIdx][1];
     }
     async startPreview() {
+        if (!this.previewing)
+            this.host.player.unlock();
         const eng = this.host.engine();
         if (!eng) {
             this.host.status('La base de phrases se charge encore, patientez un instant.', true);
@@ -13979,7 +14291,7 @@ class StyleUi {
                 style: d.id, styleDef: d,
                 styleVariants: { drums: drumsChoice, bass: alt ? 'alt' : this.vi.bass, keys: alt ? 'alt' : this.vi.keys },
             });
-            this.host.player.setOptions({ loop: true, muteDrums: this.mutes.drums, muteBass: this.mutes.bass, mutePiano: this.mutes.keys, bassVolume: 1, drumsVolume: 1, pianoVolume: 1, countInBeats: 0, beatsPerBar: acc.timeSignature.nbNaturalBeats });
+            this.host.player.setOptions({ loop: true, muteDrums: this.mutes.drums, muteBass: this.mutes.bass, mutePiano: this.mutes.keys, bassVolume: 1, drumsVolume: 1, pianoVolume: 1, countInBeats: 0, beatsPerBar: acc.timeSignature.nbNaturalBeats, ...(this.host.sound?.() ?? {}) });
             this.previewing = true;
             this.updatePlayLabel();
             this.previewBars = acc.nbBars;
